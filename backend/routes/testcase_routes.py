@@ -7,24 +7,7 @@ from utils.logger import logger
 
 testcase_bp = Blueprint("testcase_bp", __name__)
 
-DEFAULT_TEST_CASES = [
-    {
-        "id": "tc-default-1",
-        "project_id": "proj-default-1",
-        "name": "Biometric Attendance Check-In",
-        "type": "txt",
-        "commands": "Navigate to http://officehub360.vtabsquare.com\nClick on 'Biometric Clock In'\nWait for face camera detection 3 seconds\nClick on 'Confirm Attendance'\nVerify 'Check-in Successful'",
-        "cached_json": [
-            {"action": "goto", "target": "http://officehub360.vtabsquare.com", "value": "", "raw_command": "Navigate to http://officehub360.vtabsquare.com"},
-            {"action": "click", "target": "Biometric Clock In", "value": "", "raw_command": "Click on 'Biometric Clock In'"},
-            {"action": "wait", "target": "", "value": "3000", "raw_command": "Wait for face camera detection 3 seconds"},
-            {"action": "click", "target": "Confirm Attendance", "value": "", "raw_command": "Click on 'Confirm Attendance'"},
-            {"action": "verify", "target": "Check-in Successful", "value": "", "raw_command": "Verify 'Check-in Successful'"}
-        ],
-        "status": "passed",
-        "created_at": "2026-08-01T10:05:00Z"
-    }
-]
+DEFAULT_TEST_CASES = []
 
 def load_test_cases():
     if not TESTCASES_DB_FILE.exists():

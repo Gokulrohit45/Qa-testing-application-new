@@ -4,8 +4,8 @@ import { AuthenticationService } from '../../services/api';
 import { Cpu, Lock, Mail, ArrowRight, ShieldCheck } from 'lucide-react';
 
 export default function Login({ setSession }) {
-  const [email, setEmail] = useState('qa_tester@local.dev');
-  const [password, setPassword] = useState('password123');
+  const [email, setEmail] = useState('gokulnath96880@gmail.com');
+  const [password, setPassword] = useState('gokul@45');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const navigate = useNavigate();

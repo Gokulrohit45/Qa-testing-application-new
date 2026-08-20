@@ -1,6 +1,6 @@
 import { supabase } from '../supabaseClient';
 
-const FLASK_BASE_URL = 'http://127.0.0.1:5000/api';
+const FLASK_BASE_URL = 'https://qa-testing-application-new.onrender.com/api';
 
 // Helper for HTTP requests
 async function fetchLocal(endpoint, options = {}) {
@@ -42,8 +42,8 @@ export const AuthenticationService = {
         user: {
           id: 'user_1',
           user_id: 'user_1',
-          email: email || 'qa_tester@local.dev',
-          user_metadata: { full_name: 'QA Engineer (Offline)' }
+          email: email || 'gokulnath96880@gmail.com',
+          user_metadata: { full_name: 'Gokulnath' }
         }
       };
       localStorage.setItem('qa_offline_session', JSON.stringify(fallbackSession));

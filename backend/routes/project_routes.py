@@ -7,28 +7,7 @@ from utils.logger import logger
 
 project_bp = Blueprint("project_bp", __name__)
 
-DEFAULT_STARTER_PROJECTS = [
-    {
-        "id": "proj-default-1",
-        "name": "HR Office Hub 360",
-        "app_name": "Office Hub HR",
-        "app_url": "http://officehub360.vtabsquare.com",
-        "description": "Biometric face-authentication HR workflow testing suite.",
-        "face_auth_enabled": True,
-        "created_at": "2026-08-01T10:00:00Z",
-        "updated_at": "2026-08-01T10:00:00Z"
-    },
-    {
-        "id": "proj-default-2",
-        "name": "E-Commerce QA Automation",
-        "app_name": "Store Front Portal",
-        "app_url": "https://demo.playwright.dev/todomvc/",
-        "description": "Natural language smoke & sanity test pipeline.",
-        "face_auth_enabled": False,
-        "created_at": "2026-08-05T12:00:00Z",
-        "updated_at": "2026-08-05T12:00:00Z"
-    }
-]
+DEFAULT_STARTER_PROJECTS = []
 
 def load_projects():
     if not PROJECTS_DB_FILE.exists():
