@@ -92,7 +92,7 @@ def translate_prompt():
         try:
             import google.generativeai as genai
             genai.configure(api_key=GEMINI_API_KEY)
-            model = genai.GenerativeModel('gemini-pro')
+            model = genai.GenerativeModel('gemini-1.5-flash')
             
             system_instruction = """
             You are a Playwright automation parser. Convert the natural language instructions into a JSON array of steps.

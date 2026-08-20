@@ -73,3 +73,24 @@ def delete_project(project_id):
     updated = [p for p in projects if p.get("id") != project_id]
     save_projects(updated)
     return jsonify({"success": True, "message": "Project deleted"}), 200
+
+@project_bp.route("/api/projects/<project_id>", methods=["PUT"])
+def update_project(project_id):
+    data = request.json or {}
+    projects = load_projects()
+    found = None
+    for p in projects:
+        if p.get("id") == project_id:
+            p["name"] = data.get("name", p.get("name"))
+            p["app_name"] = data.get("app_name", p.get("app_name"))
+            p["app_url"] = data.get("app_url", p.get("app_url"))
+            p["description"] = data.get("description", p.get("description"))
+            p["face_auth_enabled"] = data.get("face_auth_enabled", p.get("face_auth_enabled"))
+            p["video_file_path"] = data.get("video_file_path", p.get("video_file_path"))
+            p["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            found = p
+            break
+    save_projects(projects)
+    if found:
+        return jsonify(found), 200
+    return jsonify({"error": "Project not found"}), 404

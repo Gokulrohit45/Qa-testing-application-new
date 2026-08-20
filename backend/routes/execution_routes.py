@@ -43,6 +43,20 @@ def trigger_execution():
     )
     thread.start()
 
+    # Also save initial execution record with project_id to disk immediately
+    from core.playwright_runner import load_json_file, save_json_file, EXECUTIONS_DB_FILE
+    import time as _time
+    all_execs = load_json_file(EXECUTIONS_DB_FILE, [])
+    all_execs.insert(0, {
+        "id": execution_id,
+        "project_id": project_id,
+        "status": "Running",
+        "error_message": None,
+        "duration_ms": 0,
+        "created_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ")
+    })
+    save_json_file(EXECUTIONS_DB_FILE, all_execs)
+
     return jsonify({
         "execution_id": execution_id,
         "status": "Running",

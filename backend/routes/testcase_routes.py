@@ -82,3 +82,10 @@ def update_test_case(tc_id):
     if found:
         return jsonify(found), 200
     return jsonify({"error": "Test case not found"}), 404
+
+@testcase_bp.route("/api/testcases/<tc_id>", methods=["DELETE"])
+def delete_test_case(tc_id):
+    cases = load_test_cases()
+    updated = [c for c in cases if c.get("id") != tc_id]
+    save_test_cases(updated)
+    return jsonify({"success": True, "message": "Test case deleted"}), 200

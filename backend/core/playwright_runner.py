@@ -221,10 +221,7 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                     }
                     logs.append(log_item)
                     EXECUTION_LOGS_CACHE[execution_id] = list(logs)
-                    update_disk_execution_logs(execution_id, logs, status="Running" if not has_error else "Failed")
-
-                    if has_error:
-                        break
+                    update_disk_execution_logs(execution_id, logs, status="Running")
 
             browser.close()
 
