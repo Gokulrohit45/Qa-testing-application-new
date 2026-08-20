@@ -180,9 +180,13 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                         if action == "goto":
                             page.goto(target, wait_until="domcontentloaded", timeout=10000)
                         elif action == "click":
-                            smart_click(page, target, timeout=6000)
+                            res = smart_click(page, target, timeout=6000)
+                            if not res:
+                                raise RuntimeError(f"Could not click target '{target}'")
                         elif action == "fill":
-                            smart_fill(page, target, value, timeout=6000)
+                            res = smart_fill(page, target, value, timeout=6000)
+                            if not res:
+                                raise RuntimeError(f"Could not fill target '{target}' with value '{value}'")
                         elif action == "wait":
                             wait_ms = int(value) if str(value).isdigit() else 2000
                             time.sleep(wait_ms / 1000.0)
@@ -194,6 +198,7 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                         else:
                             time.sleep(1)
 
+                        time.sleep(0.4) # Brief pause to allow DOM render before screenshot
                         page.screenshot(path=str(screenshot_path))
                     except Exception as e:
                         step_status = "failed"
