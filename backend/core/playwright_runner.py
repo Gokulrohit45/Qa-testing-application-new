@@ -191,7 +191,10 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                             wait_ms = int(value) if str(value).isdigit() else 2000
                             time.sleep(wait_ms / 1000.0)
                         elif action == "verify":
-                            page.wait_for_selector(f"text='{target}'", timeout=6000)
+                            try:
+                                page.wait_for_selector(f":has-text('{target}')", timeout=6000)
+                            except Exception:
+                                page.wait_for_selector(f"text={target}", timeout=6000)
                         elif action == "upload_file":
                             if Path(value).exists():
                                 page.set_input_files(target, value)

@@ -11,6 +11,7 @@ import Dashboard from './pages/dashboard/Dashboard';
 import CreateProject from './pages/projects/CreateProject';
 import ProjectDetails from './pages/projects/ProjectDetails';
 import Profile from './pages/auth/Profile';
+import Settings from './pages/settings/Settings';
 
 import { AuthenticationService, ProjectService } from './services/api';
 
@@ -169,6 +170,15 @@ export default function App() {
                 element={
                   <ProtectedRoute session={session}>
                     <Profile session={session} setSession={setSession} />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/settings"
+                element={
+                  <ProtectedRoute session={session}>
+                    <Settings />
                   </ProtectedRoute>
                 }
               />

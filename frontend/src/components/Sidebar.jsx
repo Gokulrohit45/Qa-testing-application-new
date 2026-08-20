@@ -2,7 +2,7 @@ import React from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { 
   LayoutDashboard, PlusCircle, FolderGit2, User, LogOut, 
-  ChevronDown, Zap 
+  ChevronDown, Zap, Settings as SettingsIcon 
 } from 'lucide-react';
 import { AuthenticationService } from '../services/api';
 
@@ -137,6 +137,20 @@ export default function Sidebar({ projects = [], selectedProject, onSelectProjec
           >
             <User className="w-4 h-4 shrink-0" />
             <span>Profile</span>
+          </NavLink>
+
+          <NavLink
+            to="/settings"
+            className={({ isActive }) =>
+              `flex items-center space-x-3 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
+                isActive
+                  ? 'bg-indigo-600/15 text-indigo-400 border border-indigo-500/30'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-dark-card/60'
+              }`
+            }
+          >
+            <SettingsIcon className="w-4 h-4 shrink-0" />
+            <span>Settings</span>
           </NavLink>
         </div>
       </nav>
