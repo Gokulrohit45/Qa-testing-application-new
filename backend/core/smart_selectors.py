@@ -1,7 +1,13 @@
-from playwright.sync_api import Page, ElementHandle
 from utils.logger import logger
 
-def smart_fill(page: Page, target: str, value: str, timeout: int = 5000) -> bool:
+# Graceful optional type-hint imports for Playwright
+try:
+    from playwright.sync_api import Page, ElementHandle
+except ImportError:
+    Page = object
+    ElementHandle = object
+
+def smart_fill(page, target: str, value: str, timeout: int = 5000) -> bool:
     """
     Intelligently attempts to find an input element by placeholder, label, name, ID, aria-label, or CSS selector
     and fill it with value.
@@ -37,7 +43,7 @@ def smart_fill(page: Page, target: str, value: str, timeout: int = 5000) -> bool
         return False
 
 
-def smart_click(page: Page, target: str, timeout: int = 5000) -> bool:
+def smart_click(page, target: str, timeout: int = 5000) -> bool:
     """
     Intelligently attempts to click a button, link, or element by text, role, ARIA label, ID, or selector.
     """
