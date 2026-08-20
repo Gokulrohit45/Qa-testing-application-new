@@ -108,11 +108,13 @@ def upload_asset():
 
 # ── List Assets for Project ────────────────────────────────────────────────────
 @asset_bp.route("/api/assets", methods=["GET"])
-def list_assets():
-    project_id = request.args.get("project_id", "")
+@asset_bp.route("/api/projects/<project_id>/assets", methods=["GET"])
+def list_assets(project_id=None):
+    if not project_id:
+        project_id = request.args.get("project_id", "")
     all_assets = load_assets()
     if project_id:
-        all_assets = [a for a in all_assets if a.get("project_id") == project_id]
+        all_assets = [a for a in all_assets if a.get("project_id") == str(project_id)]
     return jsonify(all_assets), 200
 
 # ── Delete Asset ───────────────────────────────────────────────────────────────
