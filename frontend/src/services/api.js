@@ -117,14 +117,22 @@ export const ProjectService = {
     // 1. Local Storage
     try {
       const lsProjects = JSON.parse(localStorage.getItem('qa_projects') || '[]');
-      lsProjects.forEach(p => projectsMap.set(p.id, p));
+      lsProjects.forEach(p => {
+        if (p && p.id && !p.id.startsWith('proj-default-') && p.name !== 'reporting' && p.name !== 'Reporting Tool' && p.name !== 'Hr Tool' && p.name !== 'onboarding' && p.name !== 'Buildsmart estimator application' && p.name !== 'HR Tool') {
+          projectsMap.set(p.id, p);
+        }
+      });
     } catch (e) {}
 
     // 2. Local Flask Backend
     try {
       const localProjects = await fetchLocal('/projects');
       if (Array.isArray(localProjects)) {
-        localProjects.forEach(p => projectsMap.set(p.id, p));
+        localProjects.forEach(p => {
+          if (p && p.id && !p.id.startsWith('proj-default-') && p.name !== 'reporting' && p.name !== 'Reporting Tool' && p.name !== 'Hr Tool' && p.name !== 'onboarding' && p.name !== 'Buildsmart estimator application' && p.name !== 'HR Tool') {
+            projectsMap.set(p.id, p);
+          }
+        });
       }
     } catch (e) {}
 
@@ -132,7 +140,11 @@ export const ProjectService = {
     try {
       const { data, error } = await supabase.from('projects').select('*');
       if (!error && data) {
-        data.forEach(p => projectsMap.set(p.id, p));
+        data.forEach(p => {
+          if (p && p.id && !p.id.startsWith('proj-default-') && p.name !== 'reporting' && p.name !== 'Reporting Tool' && p.name !== 'Hr Tool' && p.name !== 'onboarding' && p.name !== 'Buildsmart estimator application' && p.name !== 'HR Tool') {
+            projectsMap.set(p.id, p);
+          }
+        });
       }
     } catch (e) {}
 
