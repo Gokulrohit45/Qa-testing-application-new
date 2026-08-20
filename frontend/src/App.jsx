@@ -10,6 +10,7 @@ import ForgotPassword from './pages/auth/ForgotPassword';
 import Dashboard from './pages/dashboard/Dashboard';
 import CreateProject from './pages/projects/CreateProject';
 import ProjectDetails from './pages/projects/ProjectDetails';
+import Profile from './pages/auth/Profile';
 
 import { AuthenticationService, ProjectService } from './services/api';
 
@@ -81,7 +82,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0B0F17] flex items-center justify-center text-slate-400 font-mono text-xs">
+      <div className="min-h-screen bg-[#0B0F17] flex items-center justify-center text-slate-400 font-mono text-xs select-none">
         Initializing QA-AI Autonomous Testing Platform...
       </div>
     );
@@ -89,20 +90,22 @@ export default function App() {
 
   return (
     <HashRouter>
-      <div className="min-h-screen bg-[#0B0F17] text-slate-100 flex flex-col overflow-hidden select-none">
+      <div className="min-h-screen bg-[#0B0F17] text-slate-100 flex overflow-hidden select-none">
         {session && (
-          <Header
-            user={session.user}
-            isOffline={session.access_token?.startsWith('offline_token_')}
+          <Sidebar
+            projects={projects}
+            selectedProject={selectedProject}
+            onSelectProject={(proj) => setSelectedProject(proj)}
+            session={session}
           />
         )}
 
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           {session && (
-            <Sidebar
+            <Header
+              user={session.user}
               projects={projects}
               selectedProject={selectedProject}
-              onSelectProject={(proj) => setSelectedProject(proj)}
             />
           )}
 
@@ -121,6 +124,11 @@ export default function App() {
                     <Dashboard
                       projects={projects}
                       onSelectProject={(p) => setSelectedProject(p)}
+                      onDeleteProject={(id) => {
+                        const updated = projects.filter(p => p.id !== id);
+                        setProjects(updated);
+                        if (updated.length > 0) setSelectedProject(updated[0]);
+                      }}
                     />
                   </ProtectedRoute>
                 }
@@ -152,6 +160,15 @@ export default function App() {
                         if (updated.length > 0) setSelectedProject(updated[0]);
                       }}
                     />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="/profile"
+                element={
+                  <ProtectedRoute session={session}>
+                    <Profile session={session} setSession={setSession} />
                   </ProtectedRoute>
                 }
               />
