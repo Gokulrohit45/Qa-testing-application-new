@@ -69,10 +69,14 @@ def smart_fill(page, target: str, value: str, timeout: int = 6000) -> bool:
             if elem:
                 elem.scroll_into_view_if_needed()
                 elem.click()
-                elem.fill("")
                 elem.fill(val_str)
-                # Type using keyboard to ensure synthetic DOM input events fire for React/Vue state
-                page.keyboard.type(val_str, delay=20)
+                try:
+                    page.evaluate("""(el) => {
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                        el.dispatchEvent(new Event('change', { bubbles: true }));
+                    }""", elem)
+                except Exception:
+                    pass
                 logger.info(f"smart_fill succeeded with selector: '{sel}' for value: '{val_str}'")
                 return True
         except Exception as e:

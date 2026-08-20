@@ -37,12 +37,20 @@ def fallback_heuristic_parser(raw_text: str) -> list:
             })
         # Fill / Type / Enter
         elif "fill" in cmd_lower or "type" in cmd_lower or "enter" in cmd_lower or "input" in cmd_lower:
-            match = re.search(r'(?:fill|type|enter|input)\s+[\'"]?([^\'"]+)[\'"]?\s+(?:in|into|with|as)\s+[\'"]?([^\'"]+)[\'"]?', line, re.IGNORECASE)
-            if match:
-                val, target = match.group(1), match.group(2)
+            match_with = re.search(r'(?:fill|type|enter|input)\s+[\'"]?([^\'"]+?)[\'"]?\s+(?:with|as)\s+[\'"]?([^\'"]+)[\'"]?', line, re.IGNORECASE)
+            match_into = re.search(r'(?:fill|type|enter|input)\s+[\'"]?([^\'"]+?)[\'"]?\s+(?:in|into)\s+[\'"]?([^\'"]+)[\'"]?', line, re.IGNORECASE)
+
+            if match_with:
+                target = match_with.group(1).strip()
+                val = match_with.group(2).strip()
+            elif match_into:
+                val = match_into.group(1).strip()
+                target = match_into.group(2).strip()
             else:
-                target = line
-                val = "test_input"
+                parts = line.split()
+                target = parts[1] if len(parts) > 1 else line
+                val = parts[2] if len(parts) > 2 else ""
+
             steps.append({
                 "action": "fill",
                 "target": target,
