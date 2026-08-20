@@ -385,12 +385,30 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
                     <span className="text-xs font-bold text-purple-300 block">Virtual Webcam Biometric Input Video (.mp4 / .y4m)</span>
                     {(project.video_file_path || videoPath) ? (
                       <div className="space-y-3">
+                        {/* Live Video Player Preview */}
+                        <div className="rounded-xl overflow-hidden border border-purple-500/30 bg-black aspect-video max-h-56 flex items-center justify-center">
+                          <video
+                            controls
+                            autoPlay
+                            muted
+                            loop
+                            className="w-full h-full object-cover"
+                            src={
+                              (videoPath || project.video_file_path)?.includes('\\') || (videoPath || project.video_file_path)?.includes('/')
+                                ? `http://127.0.0.1:5000/api/videos/${(videoPath || project.video_file_path).split(/[\/\\]/).pop().replace('.y4m', '.mp4')}`
+                                : `http://127.0.0.1:5000/api/videos/${videoPath || project.video_file_path}`
+                            }
+                          />
+                        </div>
+
                         <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-mono flex items-center gap-2">
-                          <CheckCircle2 className="w-4 h-4" /> Stream Active: {videoPath || project.video_file_path}
+                          <CheckCircle2 className="w-4 h-4 shrink-0" />
+                          <span className="truncate">Y4M Stream Active: {videoPath || project.video_file_path}</span>
                         </div>
                         <div className="flex space-x-3">
-                          <label className="px-4 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-200 text-xs font-semibold cursor-pointer hover:bg-slate-700">
+                          <label className="px-4 py-2 rounded-xl bg-slate-800 border border-slate-700 text-slate-200 text-xs font-semibold cursor-pointer hover:bg-slate-700 flex items-center gap-1.5">
                             <input type="file" accept="video/mp4" onChange={handleVideoUpload} className="hidden" />
+                            <Upload className="w-3.5 h-3.5" />
                             Replace Video
                           </label>
                         </div>

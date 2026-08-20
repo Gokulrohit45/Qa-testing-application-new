@@ -53,8 +53,9 @@ def upload_video():
         return jsonify({
             "success": True,
             "mp4_path": str(mp4_path),
-            "y4m_path": str(y4m_path) if success else str(mp4_path),
-            "y4m_ready": success,
+            "mp4_url": f"/api/videos/{mp4_filename}",
+            "y4m_path": str(y4m_path) if (success or y4m_path.exists()) else str(mp4_path),
+            "y4m_ready": (success or y4m_path.exists()),
             "project_id": project_id
         }), 201
 
@@ -134,3 +135,8 @@ def delete_asset(asset_id):
 @asset_bp.route("/api/screenshots/<filename>", methods=["GET"])
 def get_screenshot(filename):
     return send_from_directory(str(SCREENSHOTS_DIR), filename)
+
+# ── Serve Uploaded Videos for UI Preview ───────────────────────────────────────
+@asset_bp.route("/api/videos/<filename>", methods=["GET"])
+def get_video(filename):
+    return send_from_directory(str(VIDEOS_DIR), filename)
