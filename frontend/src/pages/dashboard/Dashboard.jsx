@@ -34,7 +34,7 @@ export default function Dashboard({ projects = [], onSelectProject, onDeleteProj
   };
 
   return (
-    <div className="p-8 space-y-8 overflow-y-auto max-h-[calc(100vh-3.5rem)]">
+    <div className="p-8 space-y-8 min-h-full">
       {/* Top Banner */}
       <div className="flex items-center justify-between">
         <div>

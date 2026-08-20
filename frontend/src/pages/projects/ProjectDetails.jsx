@@ -246,7 +246,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
   const selectedTc = testCases.find(tc => tc.id === selectedTestCaseId) || testCases[0];
 
   return (
-    <div className="flex flex-col h-full overflow-hidden select-none">
+    <div className="min-h-full flex flex-col select-none">
       {/* Top Header Card */}
       <div className="p-6 border-b border-dark-border bg-[#0B0F17] shrink-0 space-y-4">
         <div className="flex items-center justify-between">
@@ -341,7 +341,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
       </div>
 
       {/* Tab Contents */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div className="flex-1 p-6">
 
         {/* ── TAB 1: OVERVIEW ─────────────────────────────────────────────── */}
         {activeTab === 'overview' && (

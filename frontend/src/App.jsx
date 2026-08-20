@@ -100,7 +100,7 @@ export default function App() {
           />
         )}
 
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
           {session && (
             <Header
               user={session.user}
@@ -109,7 +109,7 @@ export default function App() {
             />
           )}
 
-          <main className="flex-1 bg-[#0B0F17] overflow-hidden">
+          <main className="flex-1 bg-[#0B0F17] overflow-y-auto min-h-0">
             <Routes>
               {/* Public Auth Routes */}
               <Route path="/login" element={<Login setSession={setSession} />} />

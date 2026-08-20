@@ -41,7 +41,7 @@ export default function Profile({ session, setSession }) {
   const initialLetter = (fullName || 'G').charAt(0).toUpperCase();
 
   return (
-    <div className="p-8 space-y-6 overflow-y-auto max-h-[calc(100vh-4rem)] max-w-6xl mx-auto">
+    <div className="p-8 space-y-6 min-h-full max-w-6xl mx-auto">
       {/* Header */}
       <div>
         <h2 className="text-2xl font-bold text-white tracking-tight">Profile</h2>
