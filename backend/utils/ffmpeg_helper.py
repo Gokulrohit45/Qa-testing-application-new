@@ -37,7 +37,7 @@ def convert_mp4_to_y4m(input_path: str, output_path: str) -> bool:
     except Exception as e:
         logger.warning(f"FFmpeg CLI execution failed ({e}). Falling back to OpenCV.")
 
-    # Attempt 2: OpenCV fallback converter
+    # Attempt 2: OpenCV fallback converter (if cv2 is installed)
     try:
         import cv2
         import numpy as np
@@ -51,7 +51,6 @@ def convert_mp4_to_y4m(input_path: str, output_path: str) -> bool:
         fps = 30
 
         with open(output_p, 'wb') as f:
-            # Write Y4M Header
             header = f"YUV4MPEG2 W{width} H{height} F{fps}:1 Ip A1:1 C420\n"
             f.write(header.encode('ascii'))
 
@@ -60,14 +59,9 @@ def convert_mp4_to_y4m(input_path: str, output_path: str) -> bool:
                 if not ret:
                     break
 
-                # Resize to 640x480
                 resized = cv2.resize(frame, (width, height))
-                # Convert BGR to YUV I420 (YUV420P)
                 yuv = cv2.cvtColor(resized, cv2.COLOR_BGR2YUV_I420)
-                
-                # Write frame header
                 f.write(b"FRAME\n")
-                # Write YUV data
                 f.write(yuv.tobytes())
 
         cap.release()
@@ -78,6 +72,9 @@ def convert_mp4_to_y4m(input_path: str, output_path: str) -> bool:
             logger.error("OpenCV video conversion produced an empty file.")
             return False
 
+    except ImportError:
+        logger.info("OpenCV module not installed on Cloud API Server; video conversion is processed locally on desktop app client.")
+        return False
     except Exception as e:
         logger.error(f"OpenCV conversion error: {str(e)}")
         return False
