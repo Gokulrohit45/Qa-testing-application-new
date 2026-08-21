@@ -196,13 +196,23 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                             wait_ms = int(value) if str(value).isdigit() else 2000
                             time.sleep(wait_ms / 1000.0)
                         elif action in ["verify", "verify_text"]:
+                            clean_target = str(target).strip()
+                            for prefix in ["verify_text ", "verify_text:", "verify ", "verify:", "assert ", "check "]:
+                                if clean_target.lower().startswith(prefix):
+                                    clean_target = clean_target[len(prefix):].strip()
+                            clean_target = clean_target.strip('"\'')
+                            
                             try:
-                                page.locator(f"text={target}").first.wait_for(state="visible", timeout=6000)
+                                page.locator(f"text={clean_target}").first.wait_for(state="visible", timeout=6000)
                             except Exception:
                                 time.sleep(0.5)
                                 body_text = page.locator("body").inner_text()
-                                if target.lower() not in body_text.lower():
-                                    raise RuntimeError(f"Text '{target}' not found on page")
+                                norm_target = " ".join(clean_target.lower().split())
+                                norm_body = " ".join(body_text.lower().split())
+                                if norm_target not in norm_body:
+                                    raw_content = page.content().lower()
+                                    if norm_target not in raw_content:
+                                        raise RuntimeError(f"Text '{clean_target}' not found on page")
                         elif action == "upload_file":
                             if Path(value).exists():
                                 page.set_input_files(target, value)

@@ -134,19 +134,19 @@ export const ProjectService = {
   async listProjects() {
     const projectsMap = new Map();
 
-    // 1. Local Flask daemon first
+    // 1. Supabase Cloud DB first (Primary source of truth across all devices)
     try {
-      const localProjects = await fetchLocal('/projects');
-      if (Array.isArray(localProjects)) {
-        localProjects.forEach(p => { if (p?.id) projectsMap.set(p.id, p); });
+      const { data, error } = await supabase.from('projects').select('*');
+      if (!error && Array.isArray(data)) {
+        data.forEach(p => { if (p?.id) projectsMap.set(p.id, p); });
       }
     } catch (e) {}
 
-    // 2. Supabase Cloud DB
+    // 2. Local Flask daemon
     try {
-      const { data, error } = await supabase.from('projects').select('*');
-      if (!error && data) {
-        data.forEach(p => { if (p?.id) projectsMap.set(p.id, p); });
+      const localProjects = await fetchLocal('/projects');
+      if (Array.isArray(localProjects)) {
+        localProjects.forEach(p => { if (p?.id && !projectsMap.has(p.id)) projectsMap.set(p.id, p); });
       }
     } catch (e) {}
 
@@ -162,79 +162,141 @@ export const ProjectService = {
   },
 
   async createProject(projectData) {
-    let newProject = null;
+    const session = await AuthenticationService.getCurrentSession();
+    const userId = getNormalizedUserId(session);
+    const projId = projectData.id || ('proj-' + Date.now());
+    const fullProject = { ...projectData, id: projId, user_id: userId, created_at: new Date().toISOString() };
+
+    // 1. Save to Supabase Cloud DB
     try {
-      newProject = await fetchLocal('/projects', { method: 'POST', body: JSON.stringify(projectData) });
-    } catch (e) {
-      newProject = { id: 'proj-' + Date.now(), ...projectData, created_at: new Date().toISOString() };
-    }
-    try {
-      const session = await AuthenticationService.getCurrentSession();
-      const userId = getNormalizedUserId(session);
-      await supabase.from('projects').insert([{ ...newProject, user_id: userId }]);
+      await supabase.from('projects').insert([fullProject]);
     } catch (e) {}
+
+    // 2. Save to Local Flask daemon
+    try {
+      await fetchLocal('/projects', { method: 'POST', body: JSON.stringify(fullProject) });
+    } catch (e) {}
+
+    // 3. Save to localStorage
     try {
       const current = JSON.parse(localStorage.getItem('qa_projects') || '[]');
-      current.unshift(newProject);
+      current.unshift(fullProject);
       localStorage.setItem('qa_projects', JSON.stringify(current));
     } catch (e) {}
-    return newProject;
+
+    return fullProject;
   },
 
   async updateProject(projectId, updates) {
+    try { await supabase.from('projects').update(updates).eq('id', projectId); } catch (e) {}
+    try { await fetchLocal(`/projects/${projectId}`, { method: 'PUT', body: JSON.stringify(updates) }); } catch (e) {}
     try {
-      return await fetchLocal(`/projects/${projectId}`, { method: 'PUT', body: JSON.stringify(updates) });
-    } catch (e) {
-      try {
-        const current = JSON.parse(localStorage.getItem('qa_projects') || '[]');
-        const updated = current.map(p => p.id === projectId ? { ...p, ...updates } : p);
-        localStorage.setItem('qa_projects', JSON.stringify(updated));
-        return updated.find(p => p.id === projectId);
-      } catch (e2) { return null; }
-    }
+      const current = JSON.parse(localStorage.getItem('qa_projects') || '[]');
+      const updated = current.map(p => p.id === projectId ? { ...p, ...updates } : p);
+      localStorage.setItem('qa_projects', JSON.stringify(updated));
+      return updated.find(p => p.id === projectId);
+    } catch (e) { return null; }
   },
 
   async deleteProject(projectId) {
-    try { await fetchLocal(`/projects/${projectId}`, { method: 'DELETE' }); } catch (e) {}
     try { await supabase.from('projects').delete().eq('id', projectId); } catch (e) {}
+    try { await fetchLocal(`/projects/${projectId}`, { method: 'DELETE' }); } catch (e) {}
     const current = JSON.parse(localStorage.getItem('qa_projects') || '[]');
     localStorage.setItem('qa_projects', JSON.stringify(current.filter(p => p.id !== projectId)));
   }
 };
 
-// ─── TEST CASE SERVICE (LOCAL only — test cases live on desktop) ──────────────
+// Helper: clean step targets (strip action prefixes like "verify_text ")
+function sanitizeSteps(steps) {
+  if (!Array.isArray(steps)) return [];
+  return steps.map(s => {
+    let cleanTarget = strVal(s.target);
+    for (const prefix of ["verify_text ", "verify_text:", "verify ", "verify:", "assert ", "check "]) {
+      if (cleanTarget.toLowerCase().startsWith(prefix)) {
+        cleanTarget = cleanTarget.substring(prefix.length).trim();
+      }
+    }
+    cleanTarget = cleanTarget.replace(/^["']|["']$/g, '').trim();
+    return { ...s, target: cleanTarget };
+  });
+}
+function strVal(v) { return v == null ? '' : String(v).trim(); }
+
+// ─── TEST CASE SERVICE (Cloud First + Local Fallback) ─────────────────────────
 export const TestCaseService = {
   async getTestCases(projectId) {
+    const tcMap = new Map();
+
+    // 1. Supabase Cloud DB
     try {
-      return await fetchLocal(`/testcases?project_id=${projectId}`);
-    } catch (e) {
-      try {
-        const all = JSON.parse(localStorage.getItem('qa_testcases') || '[]');
-        return all.filter(tc => tc.project_id === projectId);
-      } catch (e2) { return []; }
-    }
+      const { data, error } = await supabase.from('test_cases').select('*').eq('project_id', projectId);
+      if (!error && Array.isArray(data)) {
+        data.forEach(tc => { if (tc?.id) tcMap.set(tc.id, { ...tc, cached_json: sanitizeSteps(tc.cached_json) }); });
+      }
+    } catch (e) {}
+
+    // 2. Local Flask daemon
+    try {
+      const localTc = await fetchLocal(`/testcases?project_id=${projectId}`);
+      if (Array.isArray(localTc)) {
+        localTc.forEach(tc => {
+          if (tc?.id && !tcMap.has(tc.id)) {
+            tcMap.set(tc.id, { ...tc, cached_json: sanitizeSteps(tc.cached_json) });
+          }
+        });
+      }
+    } catch (e) {}
+
+    // 3. localStorage fallback
+    try {
+      const all = JSON.parse(localStorage.getItem('qa_testcases') || '[]');
+      all.filter(tc => tc.project_id === projectId).forEach(tc => {
+        if (tc?.id && !tcMap.has(tc.id)) {
+          tcMap.set(tc.id, { ...tc, cached_json: sanitizeSteps(tc.cached_json) });
+        }
+      });
+    } catch (e) {}
+
+    return Array.from(tcMap.values());
   },
 
   async createTestCase(testCaseData) {
+    const sanitizedJson = sanitizeSteps(testCaseData.cached_json);
+    const tcId = testCaseData.id || ('tc-' + Date.now());
+    const fullTc = { ...testCaseData, id: tcId, cached_json: sanitizedJson, created_at: new Date().toISOString() };
+
+    // 1. Supabase Cloud DB
+    try { await supabase.from('test_cases').insert([fullTc]); } catch (e) {}
+
+    // 2. Local Flask daemon
+    try { await fetchLocal('/testcases', { method: 'POST', body: JSON.stringify(fullTc) }); } catch (e) {}
+
+    // 3. localStorage
     try {
-      const result = await fetchLocal('/testcases', { method: 'POST', body: JSON.stringify(testCaseData) });
-      return result;
-    } catch (e) {
-      const newTc = { id: 'tc-' + Date.now(), ...testCaseData, created_at: new Date().toISOString() };
       const all = JSON.parse(localStorage.getItem('qa_testcases') || '[]');
-      all.unshift(newTc);
+      all.unshift(fullTc);
       localStorage.setItem('qa_testcases', JSON.stringify(all));
-      return newTc;
-    }
+    } catch (e) {}
+
+    return fullTc;
   },
 
   async updateTestCase(id, testCaseData) {
+    const sanitizedJson = sanitizeSteps(testCaseData.cached_json);
+    const updatedTc = { ...testCaseData, cached_json: sanitizedJson };
+
+    try { await supabase.from('test_cases').update(updatedTc).eq('id', id); } catch (e) {}
+    try { await fetchLocal(`/testcases/${id}`, { method: 'PUT', body: JSON.stringify(updatedTc) }); } catch (e) {}
     try {
-      return await fetchLocal(`/testcases/${id}`, { method: 'PUT', body: JSON.stringify(testCaseData) });
-    } catch (e) { return null; }
+      const all = JSON.parse(localStorage.getItem('qa_testcases') || '[]');
+      const updated = all.map(tc => tc.id === id ? { ...tc, ...updatedTc } : tc);
+      localStorage.setItem('qa_testcases', JSON.stringify(updated));
+      return updated.find(tc => tc.id === id);
+    } catch (e) { return updatedTc; }
   },
 
   async deleteTestCase(id) {
+    try { await supabase.from('test_cases').delete().eq('id', id); } catch (e) {}
     try { await fetchLocal(`/testcases/${id}`, { method: 'DELETE' }); } catch (e) {}
     const all = JSON.parse(localStorage.getItem('qa_testcases') || '[]');
     localStorage.setItem('qa_testcases', JSON.stringify(all.filter(tc => tc.id !== id)));

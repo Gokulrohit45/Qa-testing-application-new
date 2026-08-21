@@ -21,26 +21,55 @@ function startPythonBackend() {
   const target = getPythonEnginePath();
   console.log("[Electron] Starting Python Backend from:", target.path);
   
-  try {
-    if (target.type === "exe") {
-      pythonProcess = spawn(target.path, [], { cwd: path.dirname(target.path), env: { ...process.env, PORT: "5000" } });
-    } else {
-      // Try venv python first if available
-      const venvPythonWin = path.join(path.dirname(target.path), "venv", "Scripts", "python.exe");
-      const pythonCmd = fs.existsSync(venvPythonWin) ? venvPythonWin : "python";
-      pythonProcess = spawn(pythonCmd, [target.path], { cwd: path.dirname(target.path), env: { ...process.env, PORT: "5000" } });
+  if (!fs.existsSync(target.path)) {
+    console.warn("[Electron] Python script not found at target path:", target.path);
+    return;
+  }
+
+  const scriptDir = path.dirname(target.path);
+  const venvPython = path.join(scriptDir, "venv", "Scripts", "python.exe");
+
+  let cmdsToTry = [];
+  if (fs.existsSync(venvPython)) {
+    cmdsToTry.push(venvPython);
+  }
+  cmdsToTry.push("python", "python3", "py");
+
+  function trySpawn(index) {
+    if (index >= cmdsToTry.length) {
+      console.error("[Electron] All Python execution attempts failed.");
+      return;
     }
 
-    if (pythonProcess) {
-      pythonProcess.on("error", (err) => {
-        console.error("[Electron] Failed to start Python backend (Python might not be in PATH):", err);
+    const cmd = cmdsToTry[index];
+    console.log(`[Electron] Attempting to spawn Python daemon using '${cmd}'...`);
+
+    try {
+      const proc = spawn(cmd, [target.path], {
+        cwd: scriptDir,
+        env: { ...process.env, PORT: "5000" }
       });
-      pythonProcess.stdout?.on("data", (data) => console.log(`[Python Engine] ${data}`));
-      pythonProcess.stderr?.on("data", (data) => console.error(`[Python Engine Error] ${data}`));
+
+      proc.stdout?.on("data", (data) => {
+        console.log(`[Python Engine] ${data}`);
+      });
+      proc.stderr?.on("data", (data) => {
+        console.error(`[Python Engine Log] ${data}`);
+      });
+
+      proc.on("error", (err) => {
+        console.warn(`[Electron] Spawning '${cmd}' failed:`, err.message);
+        trySpawn(index + 1);
+      });
+
+      pythonProcess = proc;
+    } catch (err) {
+      console.warn(`[Electron] Exception launching '${cmd}':`, err.message);
+      trySpawn(index + 1);
     }
-  } catch (err) {
-    console.error("[Electron] Exception during spawning Python process:", err);
   }
+
+  trySpawn(0);
 }
 
 function waitForBackend(callback, retries = 50) {
