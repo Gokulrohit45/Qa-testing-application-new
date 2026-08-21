@@ -4,19 +4,9 @@ import { Zap, Monitor, Cpu, Terminal, Activity, Download, ShieldCheck } from 'lu
 export default function Home() {
 
   const handleDownloadWindows = () => {
-    // Link to GitHub Releases asset
     const link = document.createElement('a');
-    link.href = 'https://github.com/Gokulrohit45/Qa-testing-application-new/releases/download/v2.0.0/QA-AI-Platform-Setup-2.0.0.exe';
-    link.download = 'QA-AI-Platform-Setup-2.0.0.exe';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const handleDownloadMac = () => {
-    const link = document.createElement('a');
-    link.href = 'https://github.com/Gokulrohit45/Qa-testing-application-new/releases/download/v2.0.0/QA-AI-Platform-Setup-2.0.0.dmg';
-    link.download = 'QA-AI-Platform-Setup-2.0.0.dmg';
+    link.href = 'https://github.com/Gokulrohit45/Qa-testing-application-new/releases/download/v1.0.0/QA-AI.Platform-1.0.0-win.zip';
+    link.download = 'QA-AI.Platform-1.0.0-win.zip';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -60,11 +50,11 @@ export default function Home() {
         {/* Hero CTA Download Options */}
         <div className="flex flex-wrap items-center justify-center gap-4 mt-10">
           <button onClick={handleDownloadWindows} className="px-6 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black transition-all flex items-center gap-2.5 shadow-lg shadow-indigo-600/35 hover:-translate-y-0.5">
-            <Download size={15}/> Download for Windows (.exe)
+            <Download size={15}/> Download for Windows (.zip)
           </button>
-          <button onClick={handleDownloadMac} className="px-6 py-3.5 rounded-2xl bg-slate-900 border border-slate-800 hover:bg-slate-850 hover:border-slate-700 text-white text-xs font-black transition-all flex items-center gap-2.5 hover:-translate-y-0.5">
-            <Monitor size={15} className="text-indigo-400"/> Download for macOS (.dmg)
-          </button>
+          <a href="https://github.com/Gokulrohit45/Qa-testing-application-new/releases/tag/v1.0.0" target="_blank" rel="noopener noreferrer" className="px-6 py-3.5 rounded-2xl bg-slate-900 border border-slate-800 hover:bg-slate-800 hover:border-slate-700 text-white text-xs font-black transition-all flex items-center gap-2.5 hover:-translate-y-0.5">
+            <Monitor size={15} className="text-indigo-400"/> View All Releases
+          </a>
         </div>
       </section>
 
