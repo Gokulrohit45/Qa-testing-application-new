@@ -32,6 +32,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:web": "vite build",
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "electron:build": "vite build && electron-builder --win"
@@ -54,5 +55,9 @@
     "tailwindcss": "^3.4.1",
     "vite": "^5.4.21",
     "wait-on": "^7.2.0"
+  },
+  "optionalDependencies": {
+    "electron": "^29.1.0",
+    "electron-builder": "^24.13.3"
   }
 }
