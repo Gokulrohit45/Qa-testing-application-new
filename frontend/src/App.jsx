@@ -11,7 +11,7 @@ import Dashboard from './pages/dashboard/Dashboard';
 import CreateProject from './pages/projects/CreateProject';
 import ProjectDetails from './pages/projects/ProjectDetails';
 import Profile from './pages/auth/Profile';
-import Settings from './pages/settings/Settings';
+import Home from './pages/Home';
 
 import { AuthenticationService, ProjectService } from './services/api';
 
@@ -20,6 +20,8 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [projects, setProjects] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
+
+  const isElectron = window.navigator.userAgent.toLowerCase().includes("electron");
 
   // Initialize session
   useEffect(() => {
@@ -83,7 +85,7 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0B0F17] flex items-center justify-center text-slate-400 font-mono text-xs select-none">
+      <div className="min-h-screen page-bg flex items-center justify-center text-muted font-mono text-xs select-none">
         Initializing QA-AI Autonomous Testing Platform...
       </div>
     );
@@ -91,26 +93,24 @@ export default function App() {
 
   return (
     <HashRouter>
-      <div className="min-h-screen bg-[#0B0F17] text-slate-100 flex overflow-hidden select-none">
+      <div className="h-screen page-bg text-primary flex overflow-hidden select-none">
         {session && (
           <Sidebar
             projects={projects}
             selectedProject={selectedProject}
-            onSelectProject={(proj) => setSelectedProject(proj)}
-            session={session}
+            setSelectedProject={setSelectedProject}
+            onLogout={() => setSession(null)}
           />
         )}
 
         <div className="flex-1 flex flex-col min-w-0 h-screen overflow-hidden">
           {session && (
             <Header
-              user={session.user}
-              projects={projects}
               selectedProject={selectedProject}
             />
           )}
 
-          <main className="flex-1 bg-[#0B0F17] overflow-y-auto min-h-0">
+          <main className="flex-1 page-bg overflow-y-auto min-h-0">
             <Routes>
               {/* Public Auth Routes */}
               <Route path="/login" element={<Login setSession={setSession} />} />
@@ -118,49 +118,67 @@ export default function App() {
               <Route path="/forgot-password" element={<ForgotPassword />} />
 
               {/* Protected App Routes */}
+              <Route 
+                path="/" 
+                element={isElectron ? <Navigate to={session ? "/dashboard" : "/login"} replace /> : <Home />} 
+              />
+
               <Route
                 path="/dashboard"
                 element={
                   <ProtectedRoute session={session}>
-                    <Dashboard
-                      projects={projects}
-                      onSelectProject={(p) => setSelectedProject(p)}
-                      onDeleteProject={(id) => {
-                        const updated = projects.filter(p => p.id !== id);
-                        setProjects(updated);
-                        if (updated.length > 0) setSelectedProject(updated[0]);
-                      }}
-                    />
+                    <div className="p-6">
+                      <Dashboard
+                        projects={projects}
+                        executions={[]}
+                        onDeleteProject={async (id) => {
+                          const updated = projects.filter(p => p.id !== id);
+                          setProjects(updated);
+                          if (updated.length > 0) setSelectedProject(updated[0]);
+                        }}
+                      />
+                    </div>
                   </ProtectedRoute>
                 }
               />
 
               <Route
-                path="/projects/new"
+                path="/projects/create"
                 element={
                   <ProtectedRoute session={session}>
-                    <CreateProject
-                      onProjectCreated={(newProj) => {
-                        setProjects([newProj, ...projects]);
-                        setSelectedProject(newProj);
-                      }}
-                    />
+                    <div className="p-6">
+                      <CreateProject
+                        projects={projects}
+                        setProjects={async (newProj) => {
+                          const created = await ProjectService.createProject(newProj);
+                          setProjects(prev => [created, ...prev]);
+                          setSelectedProject(created);
+                          return created;
+                        }}
+                      />
+                    </div>
                   </ProtectedRoute>
                 }
               />
+
+
+
+              <Route path="/projects/new" element={<Navigate to="/projects/create" replace />} />
 
               <Route
                 path="/projects/:id"
                 element={
                   <ProtectedRoute session={session}>
-                    <ProjectDetails
-                      projects={projects}
-                      onDeleteProject={(deletedId) => {
-                        const updated = projects.filter(p => p.id !== deletedId);
-                        setProjects(updated);
-                        if (updated.length > 0) setSelectedProject(updated[0]);
-                      }}
-                    />
+                    <div className="p-6">
+                      <ProjectDetails
+                        projects={projects}
+                        onDeleteProject={(deletedId) => {
+                          const updated = projects.filter(p => String(p.id) !== String(deletedId));
+                          setProjects(updated);
+                          if (updated.length > 0) setSelectedProject(updated[0]);
+                        }}
+                      />
+                    </div>
                   </ProtectedRoute>
                 }
               />
@@ -169,24 +187,17 @@ export default function App() {
                 path="/profile"
                 element={
                   <ProtectedRoute session={session}>
-                    <Profile session={session} setSession={setSession} />
+                    <div className="p-6"><Profile /></div>
                   </ProtectedRoute>
                 }
               />
 
-              <Route
-                path="/settings"
-                element={
-                  <ProtectedRoute session={session}>
-                    <Settings />
-                  </ProtectedRoute>
-                }
-              />
+
 
               {/* Fallback route */}
               <Route
                 path="*"
-                element={<Navigate to={session ? "/dashboard" : "/login"} replace />}
+                element={<Navigate to={session ? "/dashboard" : (isElectron ? "/login" : "/")} replace />}
               />
             </Routes>
           </main>

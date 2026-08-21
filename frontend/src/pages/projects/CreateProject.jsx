@@ -1,212 +1,147 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ProjectService, AssetService } from '../../services/api';
-import { ArrowLeft, Lock, Camera, Upload, CheckCircle, Globe } from 'lucide-react';
+import { ArrowLeft, Briefcase, Link2, FileText, Zap, ToggleLeft, ToggleRight, Upload } from 'lucide-react';
 
-export default function CreateProject({ onProjectCreated }) {
-  const [name, setName] = useState('');
-  const [appName, setAppName] = useState('');
-  const [appUrl, setAppUrl] = useState('http://officehub360.vtabsquare.com');
-  const [description, setDescription] = useState('');
+const LOCAL_ENGINE_URL = import.meta.env.VITE_LOCAL_ENGINE_URL || 'http://localhost:5000';
+
+export default function CreateProject({ projects, setProjects }) {
+  const [form, setForm] = useState({ name:'', appName:'', appUrl:'', description:'' });
   const [faceAuthEnabled, setFaceAuthEnabled] = useState(false);
-  const [videoFile, setVideoFile] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [y4mPath, setY4mPath] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [faceVideoFile, setFaceVideoFile]     = useState(null);
   const navigate = useNavigate();
-
-  const handleVideoUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-    setVideoFile(file);
-    setUploading(true);
-
-    try {
-      const res = await AssetService.uploadVideo(file);
-      if (res?.y4m_path) {
-        setY4mPath(res.y4m_path);
-      }
-    } catch (err) {
-      alert('Failed to process video: ' + err.message);
-    } finally {
-      setUploading(false);
-    }
-  };
+  const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!name || !appUrl) return;
-
-    setLoading(true);
-
-    const projectPayload = {
-      name,
-      app_name: appName || name,
-      app_url: appUrl,
-      description,
-      face_auth_enabled: faceAuthEnabled,
-      video_file_path: y4mPath
+    setSubmitting(true);
+    const newProject = {
+      name: form.name,
+      app_name: form.appName || form.name,
+      app_url: form.appUrl.startsWith('http') ? form.appUrl : `https://${form.appUrl}`,
+      description: form.description,
+      face_auth_enabled: faceAuthEnabled
     };
 
-    try {
-      const created = await ProjectService.createProject(projectPayload);
-      if (onProjectCreated) onProjectCreated(created);
-      navigate(`/projects/${created.id}`);
-    } catch (err) {
-      alert('Failed to create project: ' + err.message);
-    } finally {
-      setLoading(false);
+    const created = await setProjects(newProject);
+
+    // If face auth is enabled or video attached, sync to backend
+    const projId = created?.id || (projects.length > 0 ? projects[0].id + 1 : 1);
+    if (projId) {
+      try {
+        const formData = new FormData();
+        formData.append("face_auth_enabled", faceAuthEnabled ? "true" : "false");
+        if (faceVideoFile) {
+          formData.append("video", faceVideoFile);
+        }
+        await fetch(`${LOCAL_ENGINE_URL}/api/projects/${projId}/face-auth`, {
+          method: "POST",
+          body: formData
+        });
+      } catch (err) {
+        console.error("Error saving initial face auth config:", err);
+      }
     }
+
+    setSubmitting(false);
+    navigate('/');
   };
 
   return (
-    <div className="p-8 max-w-4xl mx-auto space-y-6 min-h-full">
-      {/* Back Button */}
-      <button
-        onClick={() => navigate('/dashboard')}
-        className="w-9 h-9 rounded-xl bg-dark-card border border-dark-border flex items-center justify-center text-slate-400 hover:text-white transition-colors"
-      >
-        <ArrowLeft className="w-4 h-4" />
-      </button>
-
-      {/* Header */}
-      <div>
-        <h2 className="text-2xl font-bold text-white tracking-tight">Create New Project</h2>
-        <p className="text-xs text-slate-400 mt-1">
-          Configure a new testing workspace for your web application.
-        </p>
+    <div className="max-w-xl mx-auto space-y-6">
+      <div className="flex items-center gap-3">
+        <button onClick={() => navigate(-1)}
+          className="w-9 h-9 rounded-2xl bg-white dark:bg-[#161925] hover:bg-slate-100 dark:hover:bg-[#1d2132] flex items-center justify-center text-secondary hover:text-primary transition-colors flex-shrink-0 shadow-sm">
+          <ArrowLeft size={15}/>
+        </button>
+        <div>
+          <h1 className="text-xl font-black text-primary tracking-tight">Create New Project</h1>
+          <p className="text-secondary text-xs mt-0.5">Configure a new testing workspace for your web application.</p>
+        </div>
       </div>
 
-      <form onSubmit={handleSubmit} className="glass-card rounded-2xl p-8 border border-slate-800 space-y-6">
-        {/* Project Name */}
-        <div>
-          <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-            PROJECT NAME
-          </label>
-          <input
-            type="text"
-            required
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="e.g. Acme Billing Dashboard"
-            className="w-full bg-[#131926] border border-dark-border rounded-xl px-4 py-3 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-          />
+      <form onSubmit={handleSubmit} className="card p-6 space-y-5 shadow-sm">
+        <div className="space-y-1.5">
+          <label className="section-label">Project Name</label>
+          <div className="relative flex items-center">
+            <Briefcase size={15} className="absolute left-3.5 text-muted pointer-events-none" />
+            <input type="text" required value={form.name} onChange={e => setForm({...form, name:e.target.value})}
+              placeholder="e.g. Acme Billing Dashboard" className="input-field input-field-icon" />
+          </div>
         </div>
 
-        {/* Application Name + Target URL */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-              APPLICATION NAME
-            </label>
-            <input
-              type="text"
-              value={appName}
-              onChange={(e) => setAppName(e.target.value)}
-              placeholder="e.g. Acme Web Client"
-              className="w-full bg-[#131926] border border-dark-border rounded-xl px-4 py-3 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-            />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-1.5">
+            <label className="section-label">Application Name</label>
+            <input type="text" value={form.appName} onChange={e => setForm({...form, appName:e.target.value})}
+              placeholder="e.g. Acme Web Client" className="input-field" />
           </div>
-
-          <div>
-            <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-              TARGET URL
-            </label>
-            <div className="relative">
-              <input
-                type="url"
-                required
-                value={appUrl}
-                onChange={(e) => setAppUrl(e.target.value)}
-                placeholder="https://example.com"
-                className="w-full bg-[#131926] border border-dark-border rounded-xl px-4 py-3 pl-10 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 font-mono"
-              />
-              <Globe className="w-4 h-4 text-slate-500 absolute left-3.5 top-3.5" />
+          <div className="space-y-1.5">
+            <label className="section-label">Target URL</label>
+            <div className="relative flex items-center">
+              <Link2 size={15} className="absolute left-3.5 text-muted pointer-events-none" />
+              <input type="text" required value={form.appUrl} onChange={e => setForm({...form, appUrl:e.target.value})}
+                placeholder="https://example.com" className="input-field input-field-icon" />
             </div>
           </div>
         </div>
 
-        {/* Description */}
-        <div>
-          <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2">
-            DESCRIPTION
-          </label>
-          <textarea
-            rows={3}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Describe the application flow, test scope, and any relevant notes..."
-            className="w-full bg-[#131926] border border-dark-border rounded-xl p-4 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 leading-relaxed resize-none"
-          />
+        <div className="space-y-1.5">
+          <label className="section-label">Description</label>
+          <div className="relative flex">
+            <FileText size={15} className="absolute left-3.5 top-3.5 text-muted pointer-events-none" />
+            <textarea rows={4} value={form.description} onChange={e => setForm({...form, description:e.target.value})}
+              placeholder="Describe the application flow, test scope, and any relevant notes..."
+              className="input-field input-field-icon pt-3 resize-none" />
+          </div>
         </div>
 
-        {/* Authentication Configuration Card */}
-        <div className="p-6 rounded-2xl bg-indigo-950/20 border border-indigo-500/20 space-y-4">
+        {/* Authentication Configuration Section */}
+        <div className="p-4 rounded-xl border border-indigo-500/20 bg-slate-900 text-white space-y-3">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <Lock className="w-5 h-5 text-indigo-400" />
-              <div>
-                <h4 className="text-sm font-bold text-white">Authentication Configuration</h4>
-                <p className="text-xs text-slate-400">Configure optional Face Verification for 2FA logins.</p>
-              </div>
+            <div className="space-y-0.5">
+              <p className="font-bold text-sm text-indigo-400 flex items-center gap-1.5">
+                <span>🔐</span> Authentication Configuration
+              </p>
+              <p className="text-[11px] text-slate-400">Configure optional Face Verification for 2FA logins.</p>
             </div>
             <button
               type="button"
               onClick={() => setFaceAuthEnabled(!faceAuthEnabled)}
-              className={`px-3 py-1.5 rounded-full text-xs font-semibold border flex items-center space-x-1.5 transition-all ${
-                faceAuthEnabled
-                  ? 'bg-purple-500/20 border-purple-500/40 text-purple-300'
-                  : 'bg-slate-800 border-slate-700 text-slate-400'
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${faceAuthEnabled ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400'}`}
             >
-              <Camera className="w-3.5 h-3.5" />
-              <span>{faceAuthEnabled ? 'Face Auth Enabled' : 'Face Auth Disabled'}</span>
+              {faceAuthEnabled ? <ToggleRight size={16}/> : <ToggleLeft size={16}/>}
+              {faceAuthEnabled ? 'Face Auth Enabled' : 'Face Auth Disabled'}
             </button>
           </div>
 
-          <div className="p-4 rounded-xl bg-[#131926] border border-dark-border text-xs text-slate-300 space-y-1 font-mono">
-            <p>• <strong>Username/Email & Password:</strong> Supplied directly inside your test case commands (e.g. <span className="text-amber-400">fill Email..., fill Password...</span>).</p>
+          <div className="text-[11px] text-slate-400 leading-relaxed bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-1">
+            <p>• <strong>Username/Email &amp; Password:</strong> Supplied directly inside your test case commands (e.g. <code className="text-amber-300 font-mono">fill Email...</code>, <code className="text-amber-300 font-mono">fill Password...</code>).</p>
             <p>• <strong>Biometric Face Verification:</strong> Playwright streams virtual webcam video for face recognition logins.</p>
           </div>
 
           {faceAuthEnabled && (
-            <div className="pt-2 space-y-3">
-              <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider">
-                Upload Virtual Webcam Input Video (.mp4 / .y4m)
-              </label>
-              <label className="block border-2 border-dashed border-indigo-500/30 hover:border-indigo-400 bg-indigo-900/10 rounded-xl p-6 text-center cursor-pointer transition-colors">
+            <div className="pt-2 border-t border-slate-800 space-y-2">
+              <p className="text-xs font-semibold text-indigo-300">📷 Upload Face Verification Video (.mp4 / .y4m)</p>
+              <label className="border-2 border-dashed border-indigo-500/40 rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer hover:bg-indigo-950/30 transition-all">
+                <Upload size={20} className="text-indigo-400 mb-1"/>
+                <span className="text-xs font-bold text-indigo-200">
+                  {faceVideoFile ? `Selected: ${faceVideoFile.name}` : 'Click to select face verification video'}
+                </span>
+                <span className="text-[10px] text-slate-400 mt-0.5">Supported formats: MP4, Y4M</span>
                 <input
                   type="file"
-                  accept="video/mp4,video/x-y4m"
-                  onChange={handleVideoUpload}
+                  accept="video/mp4,video/y4m"
+                  onChange={e => setFaceVideoFile(e.target.files[0] || null)}
                   className="hidden"
                 />
-                <div className="flex flex-col items-center space-y-2">
-                  <Upload className="w-6 h-6 text-indigo-400" />
-                  <span className="text-xs text-slate-200 font-semibold">
-                    {uploading ? 'Processing Video...' : videoFile ? videoFile.name : 'Click to select MP4 video'}
-                  </span>
-                </div>
               </label>
-
-              {y4mPath && (
-                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs flex items-center space-x-2 font-mono">
-                  <CheckCircle className="w-4 h-4 shrink-0" />
-                  <span className="truncate">Y4M Stream Ready: {y4mPath}</span>
-                </div>
-              )}
             </div>
           )}
         </div>
 
-        {/* Submit button */}
-        <div className="pt-2 flex justify-end">
-          <button
-            type="submit"
-            disabled={loading || uploading}
-            className="py-3 px-8 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-xs font-semibold hover:from-indigo-500 hover:to-purple-500 transition-all shadow-lg shadow-indigo-600/30 disabled:opacity-50"
-          >
-            {loading ? 'Creating Project...' : 'Create Project'}
+        <div className="flex justify-end pt-2">
+          <button type="submit" disabled={submitting} className="btn-primary px-6">
+            <Zap size={15}/> {submitting ? 'Creating...' : 'Create Project'}
           </button>
         </div>
       </form>

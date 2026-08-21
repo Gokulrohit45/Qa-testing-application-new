@@ -98,6 +98,34 @@ export const AuthenticationService = {
   },
   async resetPasswordWithOtp(email, otp, newPassword) {
     return await fetchCloud('/auth/reset-password', { method: 'POST', body: JSON.stringify({ email, otp, new_password: newPassword }) });
+  },
+
+  async getProfile() {
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.user) {
+        const user = data.session.user;
+        return {
+          id: user.id,
+          email: user.email,
+          full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Workspace User',
+          user_metadata: user.user_metadata,
+        };
+      }
+    } catch (e) {}
+    // Fallback to localStorage offline session
+    try {
+      const local = JSON.parse(localStorage.getItem('qa_offline_session') || 'null');
+      if (local?.user) {
+        return {
+          id: local.user.id,
+          email: local.user.email,
+          full_name: local.user.user_metadata?.full_name || local.user.email?.split('@')[0] || 'Workspace User',
+          user_metadata: local.user.user_metadata || {},
+        };
+      }
+    } catch (e) {}
+    return null;
   }
 };
 
@@ -237,6 +265,9 @@ export const ExecutionService = {
     try {
       return await fetchLocal(`/executions?project_id=${projectId}`);
     } catch (e) { return []; }
+  },
+  async stopExecution(executionId) {
+    return await fetchLocal(`/executions/${executionId}/stop`, { method: 'POST' });
   }
 };
 
@@ -270,3 +301,18 @@ export const AssetService = {
     try { await fetchLocal(`/assets/${assetId}`, { method: 'DELETE' }); } catch (e) {}
   }
 };
+
+// ─── API CLIENT (Cloud Health Check) ─────────────────────────────────────────
+export const ApiClient = {
+  async checkCloudHealth() {
+    try {
+      const res = await fetch('https://qa-testing-application-new.onrender.com/api/health', {
+        signal: AbortSignal.timeout(5000)
+      });
+      return res.ok;
+    } catch (e) {
+      return false;
+    }
+  }
+};
+

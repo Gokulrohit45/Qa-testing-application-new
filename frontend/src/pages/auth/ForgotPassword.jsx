@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { AuthenticationService } from '../../services/api';
+import { useEffect } from 'react';
+import { AuthenticationService, ApiClient } from '../../services/api';
 import { Mail, ArrowLeft, KeyRound, CheckCircle, Lock, ShieldCheck, RefreshCw } from 'lucide-react';
 
 export default function ForgotPassword() {
@@ -11,7 +12,27 @@ export default function ForgotPassword() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [simulatedOtp, setSimulatedOtp] = useState(null);
+  const [cloudBooting, setCloudBooting] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    let interval = null;
+    const checkHealth = async () => {
+      const isOnline = await ApiClient.checkCloudHealth();
+      if (!isOnline) {
+        setCloudBooting(true);
+        interval = setInterval(async () => {
+          const checkAgain = await ApiClient.checkCloudHealth();
+          if (checkAgain) {
+            setCloudBooting(false);
+            clearInterval(interval);
+          }
+        }, 4000);
+      }
+    };
+    checkHealth();
+    return () => { if (interval) clearInterval(interval); };
+  }, []);
 
   const handleSendOtp = async (e) => {
     e.preventDefault();
@@ -81,6 +102,13 @@ export default function ForgotPassword() {
           <h2 className="text-xl font-bold text-white">Reset Password</h2>
           <p className="text-xs text-slate-400 mt-1">Brevo OTP Verification for Registered Email</p>
         </div>
+
+        {cloudBooting && (
+          <div className="mb-4 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 text-xs px-3.5 py-2.5 rounded-xl flex items-center justify-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
+            <span>Application backend is starting up. Please wait...</span>
+          </div>
+        )}
 
         {error && (
           <div className="mb-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs">

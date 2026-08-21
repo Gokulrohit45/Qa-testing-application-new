@@ -99,3 +99,11 @@ def list_executions():
     if project_id:
         all_execs = [e for e in all_execs if e.get("project_id") == project_id]
     return jsonify(all_execs), 200
+
+@execution_bp.route("/api/executions/<execution_id>/stop", methods=["POST"])
+def stop_execution(execution_id):
+    from core.playwright_runner import CANCELLED_EXECUTIONS
+    CANCELLED_EXECUTIONS.add(execution_id)
+    logger.info(f"Stop command registered for execution {execution_id}")
+    return jsonify({"message": "Stop request registered"}), 200
+

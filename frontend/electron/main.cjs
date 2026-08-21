@@ -21,17 +21,26 @@ function startPythonBackend() {
   const target = getPythonEnginePath();
   console.log("[Electron] Starting Python Backend from:", target.path);
   
-  if (target.type === "exe") {
-    pythonProcess = spawn(target.path, [], { cwd: path.dirname(target.path), env: { ...process.env, PORT: "5000" } });
-  } else {
-    // Try venv python first if available
-    const venvPythonWin = path.join(__dirname, "..", "..", "backend", "venv", "Scripts", "python.exe");
-    const pythonCmd = fs.existsSync(venvPythonWin) ? venvPythonWin : "python";
-    pythonProcess = spawn(pythonCmd, [target.path], { cwd: path.dirname(target.path), env: { ...process.env, PORT: "5000" } });
-  }
+  try {
+    if (target.type === "exe") {
+      pythonProcess = spawn(target.path, [], { cwd: path.dirname(target.path), env: { ...process.env, PORT: "5000" } });
+    } else {
+      // Try venv python first if available
+      const venvPythonWin = path.join(path.dirname(target.path), "venv", "Scripts", "python.exe");
+      const pythonCmd = fs.existsSync(venvPythonWin) ? venvPythonWin : "python";
+      pythonProcess = spawn(pythonCmd, [target.path], { cwd: path.dirname(target.path), env: { ...process.env, PORT: "5000" } });
+    }
 
-  pythonProcess.stdout?.on("data", (data) => console.log(`[Python Engine] ${data}`));
-  pythonProcess.stderr?.on("data", (data) => console.error(`[Python Engine Error] ${data}`));
+    if (pythonProcess) {
+      pythonProcess.on("error", (err) => {
+        console.error("[Electron] Failed to start Python backend (Python might not be in PATH):", err);
+      });
+      pythonProcess.stdout?.on("data", (data) => console.log(`[Python Engine] ${data}`));
+      pythonProcess.stderr?.on("data", (data) => console.error(`[Python Engine Error] ${data}`));
+    }
+  } catch (err) {
+    console.error("[Electron] Exception during spawning Python process:", err);
+  }
 }
 
 function waitForBackend(callback, retries = 50) {

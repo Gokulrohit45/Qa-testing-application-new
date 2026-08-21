@@ -4,15 +4,41 @@
   "version": "1.0.0",
   "type": "module",
   "main": "electron/main.cjs",
+  "build": {
+    "appId": "com.qa.ai.platform",
+    "productName": "QA-AI Platform",
+    "files": [
+      "dist/index.html",
+      "dist/assets/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend",
+        "to": "backend",
+        "filter": [
+          "**/*",
+          "!__pycache__/**/*"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "zip"
+      ]
+    }
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
-    "electron:build": "vite build && electron-builder"
+    "electron:build": "vite build && electron-builder --win"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.8",
+    "html2pdf.js": "^0.14.0",
     "lucide-react": "^0.344.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

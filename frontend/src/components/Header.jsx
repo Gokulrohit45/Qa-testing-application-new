@@ -1,59 +1,100 @@
-import React from 'react';
-import { useLocation, useNavigate, Link } from 'react-router-dom';
-import { ChevronRight } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import { ChevronRight, Sun, Moon } from 'lucide-react';
+import { useTheme } from '../context/ThemeContext';
+import { AuthenticationService, ApiClient } from '../services/api';
 
-export default function Header({ user, projects = [], selectedProject }) {
+export default function Header({ selectedProject }) {
+  const { dark, toggle } = useTheme();
   const location = useLocation();
-  const navigate = useNavigate();
+  const segments = location.pathname.split('/').filter(Boolean);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [cloudOnline, setCloudOnline] = useState(true);
 
-  const userName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Gokulnath';
-  const initialLetter = (userName || 'G').charAt(0).toUpperCase();
-
-  // Generate breadcrumb items
-  const pathParts = location.pathname.split('/').filter(Boolean);
-  const breadcrumbs = [{ name: 'Home', path: '/dashboard' }];
-
-  if (pathParts[0] === 'projects') {
-    breadcrumbs.push({ name: 'Projects', path: '/dashboard' });
-    if (pathParts[1] === 'new') {
-      breadcrumbs.push({ name: 'Create', path: '/projects/new' });
-    } else if (pathParts[1]) {
-      const proj = projects.find(p => p.id === pathParts[1]) || selectedProject;
-      breadcrumbs.push({ name: proj?.name || 'Project Details', path: `/projects/${pathParts[1]}` });
+  useEffect(() => {
+    function getUserData() {
+      const stored = localStorage.getItem('user');
+      if (stored) {
+        try { setCurrentUser(JSON.parse(stored)); } catch (e) { setCurrentUser(null); }
+      } else {
+        AuthenticationService.getProfile().then(user => {
+          if (user) {
+            setCurrentUser(user);
+            localStorage.setItem('user', JSON.stringify(user));
+          }
+        });
+      }
     }
-  } else if (pathParts[0] === 'profile') {
-    breadcrumbs.push({ name: 'Profile', path: '/profile' });
-  }
+    getUserData();
+
+    async function verifyCloud() {
+      const isOnline = await ApiClient.checkCloudHealth();
+      setCloudOnline(isOnline);
+    }
+    verifyCloud();
+    const interval = setInterval(verifyCloud, 15000);
+
+    const handleProfileUpdate = () => getUserData();
+    window.addEventListener('profile_updated', handleProfileUpdate);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('profile_updated', handleProfileUpdate);
+    };
+  }, []);
+
+  const crumbs = [
+    { label: 'Home', to: '/dashboard' },
+    ...segments.map((seg, i) => {
+      const to = '/' + segments.slice(0, i + 1).join('/');
+      const label = isNaN(seg)
+        ? seg.charAt(0).toUpperCase() + seg.slice(1)
+        : selectedProject?.name || `#${seg}`;
+      return { label, to };
+    }),
+  ];
+
+  const userInitial = currentUser
+    ? (currentUser.user_metadata?.full_name || currentUser.full_name || currentUser.email || 'U').charAt(0).toUpperCase()
+    : 'U';
 
   return (
-    <header className="h-14 border-b border-dark-border bg-[#0B0F17] px-6 flex items-center justify-between sticky top-0 z-30 select-none shrink-0">
-      {/* Breadcrumb Navigation */}
-      <div className="flex items-center space-x-2 text-xs font-medium text-slate-400">
-        {breadcrumbs.map((crumb, idx) => (
-          <React.Fragment key={crumb.path + idx}>
-            {idx > 0 && <ChevronRight className="w-3.5 h-3.5 text-slate-600" />}
-            <Link
-              to={crumb.path}
-              className={`hover:text-slate-200 transition-colors ${
-                idx === breadcrumbs.length - 1 ? 'text-slate-200 font-semibold' : ''
-              }`}
-            >
-              {crumb.name}
-            </Link>
+    <header className="h-16 surface flex items-center justify-between px-6 flex-shrink-0 border-b border-slate-100/50 dark:border-zinc-800/30">
+      {/* Breadcrumbs */}
+      <div className="flex items-center gap-1.5 text-xs font-medium text-muted">
+        {crumbs.map((c, i) => (
+          <React.Fragment key={c.to}>
+            {i > 0 && <ChevronRight size={12} className="text-slate-300 dark:text-zinc-700" />}
+            {i === crumbs.length - 1 ? (
+              <span className="text-primary font-semibold">{c.label}</span>
+            ) : (
+              <Link to={c.to} className="hover:text-primary transition-colors">{c.label}</Link>
+            )}
           </React.Fragment>
         ))}
       </div>
 
-      {/* Top Right Actions */}
-      <div className="flex items-center space-x-3">
-        {/* User Avatar Circle */}
-        <button
-          onClick={() => navigate('/profile')}
-          className="w-8 h-8 rounded-xl bg-indigo-600 text-white font-bold text-xs flex items-center justify-center hover:opacity-90 transition-opacity shadow-md shadow-indigo-600/20"
-          title="Account Profile"
-        >
-          {initialLetter}
+      {/* Right actions */}
+      <div className="flex items-center gap-3">
+        <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full border flex items-center gap-1.5 transition-all ${
+          cloudOnline
+            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400'
+            : 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
+        }`}>
+          <span className={`w-2 h-2 rounded-full ${cloudOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
+          {cloudOnline ? 'Cloud Sync Online' : 'Offline Mode (Local Engine Only)'}
+        </span>
+
+        {/* Dark / Light toggle */}
+        <button onClick={toggle} className="w-8 h-8 rounded-lg flex items-center justify-center text-muted hover:text-primary hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors" title="Toggle theme">
+          {dark ? <Sun size={15} /> : <Moon size={15} />}
         </button>
+
+        {/* Avatar */}
+        <Link to="/profile" title={currentUser?.user_metadata?.full_name || currentUser?.full_name || 'Profile'}>
+          <div className="w-8 h-8 rounded-lg gradient-brand flex items-center justify-center text-white font-black text-xs shadow-sm hover:opacity-90 transition-opacity uppercase">
+            {userInitial}
+          </div>
+        </Link>
       </div>
     </header>
   );

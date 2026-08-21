@@ -19,6 +19,7 @@ except ImportError:
 # In-memory logs store
 EXECUTION_LOGS_CACHE = {}
 EXECUTION_STATUS_CACHE = {}
+CANCELLED_EXECUTIONS = set()
 
 def load_json_file(file_path, default=None):
     if default is None:
@@ -165,6 +166,10 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
             # Execute translated JSON steps
             if not has_error:
                 for idx, step in enumerate(steps, start=len(logs) + 1):
+                    if execution_id in CANCELLED_EXECUTIONS:
+                        has_error = True
+                        global_err_msg = "Execution stopped by user"
+                        break
                     action = step.get("action", "wait").lower()
                     target = step.get("target", "")
                     value = step.get("value", "")
@@ -190,11 +195,14 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                         elif action == "wait":
                             wait_ms = int(value) if str(value).isdigit() else 2000
                             time.sleep(wait_ms / 1000.0)
-                        elif action == "verify":
+                        elif action in ["verify", "verify_text"]:
                             try:
-                                page.wait_for_selector(f":has-text('{target}')", timeout=6000)
+                                page.locator(f"text={target}").first.wait_for(state="visible", timeout=6000)
                             except Exception:
-                                page.wait_for_selector(f"text={target}", timeout=6000)
+                                time.sleep(0.5)
+                                body_text = page.locator("body").inner_text()
+                                if target.lower() not in body_text.lower():
+                                    raise RuntimeError(f"Text '{target}' not found on page")
                         elif action == "upload_file":
                             if Path(value).exists():
                                 page.set_input_files(target, value)
@@ -239,7 +247,11 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
         global_err_msg = str(e)
 
     total_duration = int((time.time() - start_time) * 1000)
-    final_status = "Failed" if has_error else "Passed"
+    if execution_id in CANCELLED_EXECUTIONS:
+        final_status = "Stopped"
+        global_err_msg = "Execution stopped by user"
+    else:
+        final_status = "Failed" if has_error else "Passed"
     
     EXECUTION_STATUS_CACHE[execution_id] = {
         "status": final_status,

@@ -1,181 +1,136 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
-import { 
-  LayoutDashboard, PlusCircle, FolderGit2, User, LogOut, 
-  ChevronDown, Zap, Settings as SettingsIcon 
-} from 'lucide-react';
+import { LayoutDashboard, PlusCircle, Briefcase, User, LogOut, Zap, ChevronRight } from 'lucide-react';
 import { AuthenticationService } from '../services/api';
 
-export default function Sidebar({ projects = [], selectedProject, onSelectProject, session }) {
+export default function Sidebar({ projects, selectedProject, setSelectedProject, onLogout }) {
+  const [currentUser, setCurrentUser] = useState(null);
   const navigate = useNavigate();
 
-  const user = session?.user;
-  const userName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Gokulnath';
-  const userEmail = user?.email || 'gokulnath96880@gmail.com';
-  const initialLetter = (userName || 'G').charAt(0).toUpperCase();
+  useEffect(() => {
+    async function getSessionUser() {
+      const user = await AuthenticationService.getProfile();
+      if (user) {
+        setCurrentUser({
+          email: user.email,
+          user_metadata: { full_name: user.full_name }
+        });
+      }
+    }
+    getSessionUser();
 
-  const handleLogout = async () => {
-    await AuthenticationService.logout();
-    window.location.reload();
-  };
+    const handleProfileUpdate = () => getSessionUser();
+    window.addEventListener('profile_updated', handleProfileUpdate);
+    return () => window.removeEventListener('profile_updated', handleProfileUpdate);
+  }, []);
 
   return (
-    <aside className="w-64 border-r border-dark-border bg-[#0B0F17] flex flex-col h-screen select-none shrink-0">
-      {/* Brand Header */}
-      <div className="p-5 border-b border-dark-border flex items-center space-x-3">
-        <div className="w-8 h-8 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-md shadow-indigo-600/30 shrink-0">
-          <Zap className="w-4 h-4 fill-white" />
+    <aside className="w-60 surface flex flex-col h-full flex-shrink-0">
+      {/* Brand */}
+      <div className="px-5 h-16 flex items-center gap-3 border-b border-slate-100/50 dark:border-zinc-800/30">
+        <div className="w-8 h-8 gradient-brand rounded-xl flex items-center justify-center shadow-md shadow-indigo-500/20 flex-shrink-0">
+          <Zap size={16} className="text-white" />
         </div>
         <div>
-          <h1 className="font-bold text-white tracking-wide text-sm leading-none">
-            QA·AI Platform
-          </h1>
-          <span className="text-[10px] text-slate-500 font-mono">v1.0.0</span>
+          <span className="font-bold text-primary text-sm tracking-tight">QA·AI Platform</span>
+          <p className="section-label leading-none mt-0.5">v2.0.0</p>
         </div>
       </div>
 
-      {/* Workspace Project Selector Dropdown */}
-      <div className="p-4 border-b border-dark-border space-y-1.5">
-        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">
-          WORKSPACE
-        </label>
+      {/* Project Switcher */}
+      <div className="px-3 py-4">
+        <p className="section-label px-2 mb-2">Workspace</p>
         <div className="relative">
           <select
             value={selectedProject?.id || ''}
-            onChange={(e) => {
-              const proj = projects.find(p => p.id === e.target.value);
+            onChange={e => {
+              const targetId = parseInt(e.target.value);
+              const proj = projects.find(p => p.id === targetId);
               if (proj) {
-                onSelectProject(proj);
+                setSelectedProject(proj);
                 navigate(`/projects/${proj.id}`);
               }
             }}
-            className="w-full bg-[#131926] border border-dark-border text-slate-200 text-xs rounded-xl px-3 py-2.5 appearance-none focus:outline-none focus:border-indigo-500 transition-colors font-medium cursor-pointer truncate pr-8"
+            className="w-full text-xs rounded-2xl px-3 py-3 focus:ring-2 focus:ring-indigo-500/20 outline-none cursor-pointer appearance-none pr-8 transition-colors
+              bg-slate-100/70 text-slate-700
+              dark:bg-[#161925] dark:text-zinc-300"
           >
-            {projects.length === 0 && <option value="">No Projects Found</option>}
-            {projects.map(p => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
+            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {projects.length === 0 && <option value="">No projects</option>}
           </select>
-          <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-3 pointer-events-none" />
+          <ChevronRight size={12} className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary rotate-90 pointer-events-none" />
         </div>
       </div>
 
-      {/* Navigation Items */}
-      <nav className="flex-1 p-4 space-y-5 overflow-y-auto">
-        {/* GENERAL Section */}
-        <div className="space-y-1">
-          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider px-3 mb-1.5">
-            GENERAL
-          </div>
-          <NavLink
-            to="/dashboard"
-            className={({ isActive }) =>
-              `flex items-center space-x-3 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
-                isActive
-                  ? 'bg-indigo-600/15 text-indigo-400 border border-indigo-500/30'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-dark-card/60'
-              }`
-            }
-          >
-            <LayoutDashboard className="w-4 h-4 shrink-0" />
-            <span>Dashboard</span>
-          </NavLink>
+      {/* Navigation */}
+      <nav className="flex-1 overflow-y-auto px-3 py-2 space-y-4 scrollbar-thin">
+        <NavSection label="General">
+          <SidebarItem to="/dashboard"       icon={<LayoutDashboard size={15} />} label="Dashboard" />
+          <SidebarItem to="/projects/create" icon={<PlusCircle size={15} />}      label="New Project" />
+        </NavSection>
 
-          <NavLink
-            to="/projects/new"
-            className={({ isActive }) =>
-              `flex items-center space-x-3 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
-                isActive
-                  ? 'bg-indigo-600/15 text-indigo-400 border border-indigo-500/30'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-dark-card/60'
-              }`
-            }
-          >
-            <PlusCircle className="w-4 h-4 shrink-0" />
-            <span>New Project</span>
-          </NavLink>
-        </div>
-
-        {/* ACTIVE WORKSPACE Section */}
         {selectedProject && (
-          <div className="space-y-1">
-            <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider px-3 mb-1.5">
-              ACTIVE WORKSPACE
-            </div>
-            <NavLink
-              to={`/projects/${selectedProject.id}`}
-              className={({ isActive }) =>
-                `flex items-center space-x-3 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
-                  isActive
-                    ? 'bg-indigo-600/15 text-indigo-400 border border-indigo-500/30'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-dark-card/60'
-                }`
-              }
-            >
-              <FolderGit2 className="w-4 h-4 shrink-0" />
-              <span className="truncate">Project Hub</span>
-            </NavLink>
-          </div>
+          <NavSection label="Active Workspace">
+            <SidebarItem to={`/projects/${selectedProject.id}`} icon={<Briefcase size={15} />} label="Project Hub" />
+          </NavSection>
         )}
 
-        {/* ACCOUNT Section */}
-        <div className="space-y-1">
-          <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider px-3 mb-1.5">
-            ACCOUNT
-          </div>
-          <NavLink
-            to="/profile"
-            className={({ isActive }) =>
-              `flex items-center space-x-3 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
-                isActive
-                  ? 'bg-indigo-600/15 text-indigo-400 border border-indigo-500/30'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-dark-card/60'
-              }`
-            }
-          >
-            <User className="w-4 h-4 shrink-0" />
-            <span>Profile</span>
-          </NavLink>
-
-          <NavLink
-            to="/settings"
-            className={({ isActive }) =>
-              `flex items-center space-x-3 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
-                isActive
-                  ? 'bg-indigo-600/15 text-indigo-400 border border-indigo-500/30'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-dark-card/60'
-              }`
-            }
-          >
-            <SettingsIcon className="w-4 h-4 shrink-0" />
-            <span>Settings</span>
-          </NavLink>
-        </div>
+        <NavSection label="Account">
+          <SidebarItem to="/profile"  icon={<User size={15} />}     label="Profile" />
+        </NavSection>
       </nav>
 
-      {/* User Card Footer */}
-      <div className="p-4 border-t border-dark-border">
-        <div className="flex items-center justify-between p-2 rounded-xl bg-dark-card/50 border border-dark-border">
-          <div className="flex items-center space-x-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
-              {initialLetter}
+      {/* User Footer */}
+      <div className="px-3 py-3 border-t border-slate-100/50 dark:border-zinc-800/30 flex-shrink-0">
+        <div className="flex items-center justify-between p-2.5 rounded-2xl hover:bg-slate-100 dark:hover:bg-[#161925] transition-colors group">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-xl gradient-brand flex items-center justify-center text-white font-bold text-xs flex-shrink-0 uppercase">
+              {currentUser ? (currentUser.user_metadata?.full_name || currentUser.email || 'U').charAt(0) : 'U'}
             </div>
-            <div className="min-w-0">
-              <p className="text-xs font-bold text-white truncate">{userName}</p>
-              <p className="text-[10px] text-slate-400 font-mono truncate">{userEmail}</p>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs font-semibold text-primary leading-none truncate">
+                {currentUser ? (currentUser.user_metadata?.full_name || 'Workspace User') : 'Guest'}
+              </p>
+              <p className="text-[10px] text-secondary mt-0.5 truncate">
+                {currentUser ? currentUser.email : 'guest@qa-platform.com'}
+              </p>
             </div>
           </div>
-          <button
-            onClick={handleLogout}
-            className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors shrink-0"
-            title="Sign Out"
-          >
-            <LogOut className="w-3.5 h-3.5" />
+          <button onClick={async () => {
+            await AuthenticationService.logout();
+            if (onLogout) onLogout();
+            navigate('/login');
+          }} className="text-muted hover:text-red-500 dark:hover:text-red-400 transition-colors p-1" title="Sign out">
+            <LogOut size={13} />
           </button>
         </div>
       </div>
     </aside>
+  );
+}
+
+function NavSection({ label, children }) {
+  return (
+    <div className="space-y-1">
+      <p className="section-label px-2 mb-1.5">{label}</p>
+      <div className="space-y-1">{children}</div>
+    </div>
+  );
+}
+
+function SidebarItem({ to, icon, label }) {
+  return (
+    <NavLink
+      to={to}
+      end={to === '/'}
+      className={({ isActive }) =>
+        `flex items-center gap-2.5 px-3.5 py-2.5 text-xs font-semibold transition-all duration-150 ${
+          isActive ? 'nav-item-active' : 'nav-item-idle'
+        }`
+      }
+    >
+      {icon}
+      {label}
+    </NavLink>
   );
 }
