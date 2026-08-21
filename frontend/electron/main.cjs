@@ -110,7 +110,7 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform === "win32") exec("taskkill /F /IM app.exe /T", () => {});
+  if (process.platform === "win32") exec("taskkill /F /IM QA-AI-Platform.exe /T", () => {});
   if (pythonProcess) pythonProcess.kill();
   if (process.platform !== "darwin") app.quit();
 });

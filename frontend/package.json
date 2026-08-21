@@ -7,6 +7,7 @@
   "build": {
     "appId": "com.qa.ai.platform",
     "productName": "QA-AI Platform",
+    "executableName": "QA-AI-Platform",
     "files": [
       "dist/index.html",
       "dist/assets/**/*",
@@ -26,7 +27,8 @@
     "win": {
       "target": [
         "zip"
-      ]
+      ],
+      "executableName": "QA-AI-Platform"
     }
   },
   "scripts": {
