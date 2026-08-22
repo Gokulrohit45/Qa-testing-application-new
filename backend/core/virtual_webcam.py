@@ -9,17 +9,13 @@ def get_chromium_camera_args(y4m_path: str = None):
     """
     args = [
         "--use-fake-ui-for-media-stream",
-        "--use-fake-device-for-media-stream",
-        "--ignore-certificate-errors",
-        "--allow-running-insecure-content",
-        "--unsafely-treat-insecure-origin-as-secure=http://officehub360.vtabsquare.com,http://localhost:5000,http://127.0.0.1:5000",
-        "--disable-web-security"
+        "--use-fake-device-for-media-stream"
     ]
 
     if y4m_path and Path(y4m_path).exists():
         logger.info(f"Injecting virtual webcam stream from Y4M: {y4m_path}")
         args.append(f"--use-file-for-fake-video-capture={os.path.abspath(y4m_path)}")
     else:
-        logger.info("No Y4M video specified or file missing; using default Chromium fake camera stream pattern.")
+        logger.info("No valid Y4M video specified; using Chromium's generated fake camera stream.")
 
     return args

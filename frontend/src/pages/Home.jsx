@@ -5,8 +5,8 @@ export default function Home() {
 
   const handleDownloadWindows = () => {
     const link = document.createElement('a');
-    link.href = 'https://github.com/Gokulrohit45/Qa-testing-application-new/releases/download/v1.0.0/QA-AI.Platform-1.0.0-win.zip';
-    link.download = 'QA-AI.Platform-1.0.0-win.zip';
+    link.href = 'https://github.com/Gokulrohit45/Qa-testing-application-new/releases/download/v1.0.0/QA-AI-Platform-1.0.0-x64.zip';
+    link.download = 'QA-AI-Platform-1.0.0-x64.zip';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

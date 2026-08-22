@@ -1,11 +1,13 @@
 import json
 import time
 import uuid
+import threading
 from pathlib import Path
 from config import SCREENSHOTS_DIR, EXECUTION_LOGS_DB_FILE, EXECUTIONS_DB_FILE
 from core.virtual_webcam import get_chromium_camera_args
 from core.smart_selectors import smart_fill, smart_click
 from utils.logger import logger
+from utils.local_store import get as store_get, upsert as store_upsert
 
 # Graceful optional import for Playwright (Available on Desktop Engine, Optional on Cloud API)
 try:
@@ -20,6 +22,11 @@ except ImportError:
 EXECUTION_LOGS_CACHE = {}
 EXECUTION_STATUS_CACHE = {}
 CANCELLED_EXECUTIONS = set()
+STORAGE_LOCK = threading.RLock()
+
+def _is_sensitive_target(target):
+    lowered = str(target).lower()
+    return any(word in lowered for word in ("password", "passwd", "pwd", "secret", "token", "api key", "otp"))
 
 def load_json_file(file_path, default=None):
     if default is None:
@@ -27,6 +34,7 @@ def load_json_file(file_path, default=None):
     if not file_path.exists():
         return default
     try:
+      with STORAGE_LOCK:
         with open(file_path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
@@ -34,59 +42,32 @@ def load_json_file(file_path, default=None):
 
 def save_json_file(file_path, data):
     try:
-        with open(file_path, "w", encoding="utf-8") as f:
+      with STORAGE_LOCK:
+        temp_path = file_path.with_suffix(file_path.suffix + ".tmp")
+        with open(temp_path, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
+            f.flush()
+        temp_path.replace(file_path)
     except Exception as e:
         logger.error(f"Error writing file {file_path}: {e}")
 
 def update_disk_execution_logs(execution_id, logs, status="Finished", error_message=None, duration_ms=0):
-    # Save step logs
-    all_logs = load_json_file(EXECUTION_LOGS_DB_FILE, {})
-    all_logs[execution_id] = logs
-    save_json_file(EXECUTION_LOGS_DB_FILE, all_logs)
+    store_upsert("execution_logs", {"id": execution_id, "logs": logs})
+    execution = store_get("execution", execution_id) or {
+        "id": execution_id, "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")}
+    execution.update({"status": status, "error_message": error_message, "duration_ms": duration_ms})
+    store_upsert("execution", execution)
 
-    # Save execution summary status
-    all_execs = load_json_file(EXECUTIONS_DB_FILE, [])
-    updated = False
-    for item in all_execs:
-        if item.get("id") == execution_id:
-            item["status"] = status
-            item["error_message"] = error_message
-            item["duration_ms"] = duration_ms
-            updated = True
-            break
-    if not updated:
-        all_execs.append({
-            "id": execution_id,
-            "status": status,
-            "error_message": error_message,
-            "duration_ms": duration_ms,
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")
-        })
-    save_json_file(EXECUTIONS_DB_FILE, all_execs)
-
-def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_enabled: bool = False, y4m_path: str = None, headless: bool = True):
+def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_enabled: bool = False, y4m_path: str = None, headless: bool = True, timeout_seconds: int = 30):
     """
     Synchronously runs Playwright actions in background thread, emitting step logs and screenshots.
     If running on Cloud Server without Playwright, delegates execution to Desktop client.
     """
     if not PLAYWRIGHT_AVAILABLE:
-        logger.info(f"Execution {execution_id}: Playwright is delegated to local desktop app client.")
-        EXECUTION_STATUS_CACHE[execution_id] = {"status": "Passed", "start_time": time.time()}
-        EXECUTION_LOGS_CACHE[execution_id] = [{
-            "id": str(uuid.uuid4()),
-            "execution_id": execution_id,
-            "step_number": 1,
-            "action": "goto",
-            "target": app_url,
-            "value": "",
-            "raw_command": f"Cloud API received execution {execution_id}",
-            "status": "passed",
-            "error_message": None,
-            "screenshot_url": None,
-            "duration_ms": 100
-        }]
-        update_disk_execution_logs(execution_id, EXECUTION_LOGS_CACHE[execution_id], status="Passed", duration_ms=100)
+        message = "Playwright is not installed in the local testing engine"
+        EXECUTION_STATUS_CACHE[execution_id] = {"status": "Failed", "error_message": message, "duration_ms": 0}
+        EXECUTION_LOGS_CACHE[execution_id] = []
+        update_disk_execution_logs(execution_id, [], status="Failed", error_message=message)
         return
 
     logger.info(f"Starting Playwright execution {execution_id} for URL {app_url}")
@@ -100,7 +81,7 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
 
     try:
         with sync_playwright() as p:
-            camera_args = get_chromium_camera_args(y4m_path if face_auth_enabled else None)
+            camera_args = get_chromium_camera_args(y4m_path) if face_auth_enabled else []
             
             browser = p.chromium.launch(
                 headless=headless,
@@ -110,10 +91,12 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
             context = browser.new_context(
                 permissions=["camera", "microphone"] if face_auth_enabled else [],
                 viewport={"width": 1280, "height": 720},
-                ignore_https_errors=True
+                ignore_https_errors=False
             )
             
             page = context.new_page()
+            action_timeout = max(3, min(int(timeout_seconds), 300)) * 1000
+            page.set_default_timeout(action_timeout)
 
             # Step 1: Default navigation to app_url if provided
             if app_url:
@@ -123,7 +106,7 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                 screenshot_path = SCREENSHOTS_DIR / screenshot_filename
                 
                 try:
-                    page.goto(app_url, wait_until="domcontentloaded", timeout=15000)
+                    page.goto(app_url, wait_until="domcontentloaded", timeout=action_timeout)
                     page.screenshot(path=str(screenshot_path))
                     step_dur = int((time.time() - step_start) * 1000)
                     
@@ -177,24 +160,33 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
 
                     step_start = time.time()
                     screenshot_filename = f"exec_{execution_id}_step_{idx}.png"
+                    before_filename = f"exec_{execution_id}_step_{idx}_before.png"
                     screenshot_path = SCREENSHOTS_DIR / screenshot_filename
+                    before_path = SCREENSHOTS_DIR / before_filename
                     step_status = "passed"
                     step_err = None
 
                     try:
+                        page.screenshot(path=str(before_path))
                         if action == "goto":
-                            page.goto(target, wait_until="domcontentloaded", timeout=10000)
+                            page.goto(target, wait_until="domcontentloaded", timeout=action_timeout)
                         elif action == "click":
-                            res = smart_click(page, target, timeout=6000)
+                            res = smart_click(page, target, timeout=action_timeout)
                             if not res:
                                 raise RuntimeError(f"Could not click target '{target}'")
                         elif action == "fill":
-                            res = smart_fill(page, target, value, timeout=6000)
+                            res = smart_fill(page, target, value, timeout=action_timeout)
                             if not res:
-                                raise RuntimeError(f"Could not fill target '{target}' with value '{value}'")
+                                raise RuntimeError(f"Could not fill target '{target}'")
                         elif action == "wait":
                             wait_ms = int(value) if str(value).isdigit() else 2000
-                            time.sleep(wait_ms / 1000.0)
+                            remaining = max(0, wait_ms)
+                            while remaining > 0:
+                                if execution_id in CANCELLED_EXECUTIONS:
+                                    raise RuntimeError("Execution stopped by user")
+                                interval = min(250, remaining)
+                                time.sleep(interval / 1000.0)
+                                remaining -= interval
                         elif action in ["verify", "verify_text"]:
                             clean_target = str(target).strip()
                             for prefix in ["verify_text ", "verify_text:", "verify ", "verify:", "assert ", "check "]:
@@ -203,7 +195,7 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                             clean_target = clean_target.strip('"\'')
                             
                             try:
-                                page.locator(f"text={clean_target}").first.wait_for(state="visible", timeout=6000)
+                                page.get_by_text(clean_target, exact=False).first.wait_for(state="visible", timeout=action_timeout)
                             except Exception:
                                 time.sleep(0.5)
                                 body_text = page.locator("body").inner_text()
@@ -214,10 +206,11 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                                     if norm_target not in raw_content:
                                         raise RuntimeError(f"Text '{clean_target}' not found on page")
                         elif action == "upload_file":
-                            if Path(value).exists():
-                                page.set_input_files(target, value)
+                            if not Path(value).is_file():
+                                raise RuntimeError(f"Upload file does not exist: {value}")
+                            page.set_input_files(target, value)
                         else:
-                            time.sleep(1)
+                            raise RuntimeError(f"Unsupported test action: {action}")
 
                         time.sleep(0.4) # Brief pause to allow DOM render before screenshot
                         page.screenshot(path=str(screenshot_path))
@@ -238,11 +231,12 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                         "step_number": idx,
                         "action": action,
                         "target": target,
-                        "value": str(value),
-                        "raw_command": raw_cmd,
+                        "value": "[REDACTED]" if action == "fill" and _is_sensitive_target(target) else str(value),
+                        "raw_command": f"fill {target} [REDACTED]" if action == "fill" and _is_sensitive_target(target) else raw_cmd,
                         "status": step_status,
                         "error_message": step_err,
                         "screenshot_url": f"/api/screenshots/{screenshot_filename}" if screenshot_path.exists() else None,
+                        "before_screenshot_url": f"/api/screenshots/{before_filename}" if before_path.exists() else None,
                         "duration_ms": step_dur
                     }
                     logs.append(log_item)
@@ -269,4 +263,5 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
         "duration_ms": total_duration
     }
     update_disk_execution_logs(execution_id, logs, status=final_status, error_message=global_err_msg, duration_ms=total_duration)
+    CANCELLED_EXECUTIONS.discard(execution_id)
     logger.info(f"Execution {execution_id} finished with status: {final_status} in {total_duration}ms")

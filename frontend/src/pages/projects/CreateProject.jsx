@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, Briefcase, Link2, FileText, Zap, ToggleLeft, ToggleRight, Upload } from 'lucide-react';
-
-const LOCAL_ENGINE_URL = import.meta.env.VITE_LOCAL_ENGINE_URL || 'http://localhost:5000';
+import { AssetService, ProjectService } from '../../services/api';
 
 export default function CreateProject({ projects, setProjects }) {
   const [form, setForm] = useState({ name:'', appName:'', appUrl:'', description:'' });
@@ -24,21 +23,12 @@ export default function CreateProject({ projects, setProjects }) {
 
     const created = await setProjects(newProject);
 
-    // If face auth is enabled or video attached, sync to backend
-    const projId = created?.id || (projects.length > 0 ? projects[0].id + 1 : 1);
-    if (projId) {
+    if (created?.id && faceVideoFile) {
       try {
-        const formData = new FormData();
-        formData.append("face_auth_enabled", faceAuthEnabled ? "true" : "false");
-        if (faceVideoFile) {
-          formData.append("video", faceVideoFile);
-        }
-        await fetch(`${LOCAL_ENGINE_URL}/api/projects/${projId}/face-auth`, {
-          method: "POST",
-          body: formData
-        });
+        const uploaded = await AssetService.uploadVideo(faceVideoFile, created.id);
+        await ProjectService.updateProject(created.id, { video_file_path: uploaded.y4m_path });
       } catch (err) {
-        console.error("Error saving initial face auth config:", err);
+        alert(`Project created, but face video preparation failed: ${err.message}`);
       }
     }
 

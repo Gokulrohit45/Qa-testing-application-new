@@ -13,12 +13,13 @@ import ProjectDetails from './pages/projects/ProjectDetails';
 import Profile from './pages/auth/Profile';
 import Home from './pages/Home';
 
-import { AuthenticationService, ProjectService } from './services/api';
+import { AuthenticationService, ProjectService, ExecutionService } from './services/api';
 
 export default function App() {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
   const [projects, setProjects] = useState([]);
+  const [executions, setExecutions] = useState([]);
   const [selectedProject, setSelectedProject] = useState(null);
 
   const isElectron = window.navigator.userAgent.toLowerCase().includes("electron");
@@ -39,6 +40,9 @@ export default function App() {
         if (list.length > 0 && !selectedProject) {
           setSelectedProject(list[0]);
         }
+        Promise.all(list.map(project => ExecutionService.getExecutionHistory(project.id)))
+          .then(groups => setExecutions(groups.flat()))
+          .catch(() => setExecutions([]));
       });
     }
   }, [session]);
@@ -51,6 +55,7 @@ export default function App() {
     const THROTTLE_MS = 10 * 1000; // 10 seconds
 
     let lastWriteTime = Date.now();
+    localStorage.setItem('last_active_timestamp', lastWriteTime.toString());
 
     const handleUserActivity = () => {
       const now = Date.now();
@@ -130,8 +135,9 @@ export default function App() {
                     <div className="p-6">
                       <Dashboard
                         projects={projects}
-                        executions={[]}
+                        executions={executions}
                         onDeleteProject={async (id) => {
+                          await ProjectService.deleteProject(id);
                           const updated = projects.filter(p => p.id !== id);
                           setProjects(updated);
                           if (updated.length > 0) setSelectedProject(updated[0]);

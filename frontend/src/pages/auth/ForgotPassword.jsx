@@ -11,7 +11,6 @@ export default function ForgotPassword() {
   const [newPassword, setNewPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [simulatedOtp, setSimulatedOtp] = useState(null);
   const [cloudBooting, setCloudBooting] = useState(false);
   const navigate = useNavigate();
 
@@ -42,7 +41,6 @@ export default function ForgotPassword() {
     try {
       const res = await AuthenticationService.sendOtp(email);
       if (res.success) {
-        setSimulatedOtp(res.simulated_otp);
         setStep(2);
       } else {
         setError(res.error || res.message || 'Failed to send OTP via Brevo.');
@@ -156,11 +154,6 @@ export default function ForgotPassword() {
         {/* Step 2: Verify OTP Code */}
         {step === 2 && (
           <form onSubmit={handleVerifyOtp} className="space-y-4">
-            {simulatedOtp && (
-              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-mono text-center mb-2">
-                [Dev Test Note] Simulated Brevo OTP Code: <strong>{simulatedOtp}</strong>
-              </div>
-            )}
             <div>
               <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
                 Enter 6-Digit OTP Code

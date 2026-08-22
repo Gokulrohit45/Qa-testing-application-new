@@ -48,11 +48,9 @@ export default function Login({ setSession }) {
       if (rememberMe) {
         localStorage.setItem('remember_me', 'true');
         localStorage.setItem('saved_email', email);
-        localStorage.setItem('saved_password', password);
       } else {
         localStorage.removeItem('remember_me');
         localStorage.removeItem('saved_email');
-        localStorage.removeItem('saved_password');
       }
       navigate('/');
     } catch (err) {

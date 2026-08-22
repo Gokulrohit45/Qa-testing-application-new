@@ -1,22 +1,94 @@
-import random
+import secrets
+import hashlib
 import time
 import requests
 from flask import Blueprint, request, jsonify
-from config import BREVO_API_KEY, BREVO_SENDER_EMAIL, BREVO_SENDER_NAME, SUPABASE_URL, SUPABASE_ANON_KEY
+from config import BREVO_API_KEY, BREVO_SENDER_EMAIL, BREVO_SENDER_NAME, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 from utils.logger import logger
 
 auth_bp = Blueprint("auth_bp", __name__)
 
 # In-memory OTP storage cache: { email: { "otp": "123456", "expires_at": timestamp } }
 OTP_CACHE = {}
+OTP_REQUEST_WINDOW = {}
+OTP_TTL_SECONDS = 10 * 60
+OTP_MAX_ATTEMPTS = 5
+OTP_REQUEST_LIMIT = 3
+OTP_REQUEST_WINDOW_SECONDS = 15 * 60
+
+def _supabase_headers(prefer=None):
+    headers = {"apikey": SUPABASE_SERVICE_ROLE_KEY, "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}", "Content-Type": "application/json"}
+    if prefer: headers["Prefer"] = prefer
+    return headers
+
+def _otp_get(email):
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        return OTP_CACHE.get(email)
+    response = requests.get(f"{SUPABASE_URL.rstrip('/')}/rest/v1/password_reset_otps",
+        params={"email": f"eq.{email}", "select": "*"}, headers=_supabase_headers(), timeout=10)
+    response.raise_for_status()
+    rows = response.json()
+    return rows[0] if rows else None
+
+def _otp_save(email, record):
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        OTP_CACHE[email] = record
+        return
+    response = requests.post(f"{SUPABASE_URL.rstrip('/')}/rest/v1/password_reset_otps",
+        params={"on_conflict": "email"}, json={"email": email, **record},
+        headers=_supabase_headers("resolution=merge-duplicates"), timeout=10)
+    response.raise_for_status()
+
+def _otp_delete(email):
+    OTP_CACHE.pop(email, None)
+    if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
+        response = requests.delete(f"{SUPABASE_URL.rstrip('/')}/rest/v1/password_reset_otps",
+            params={"email": f"eq.{email}"}, headers=_supabase_headers(), timeout=10)
+        response.raise_for_status()
+
+def _otp_hash(email: str, otp: str) -> str:
+    return hashlib.sha256(f"{email}:{otp}".encode("utf-8")).hexdigest()
+
+def _rate_limited(email: str) -> bool:
+    if SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY:
+        record = _otp_get(email)
+        return bool(record and time.time() - record.get("window_started", 0) < OTP_REQUEST_WINDOW_SECONDS and record.get("request_count", 0) >= OTP_REQUEST_LIMIT)
+    now = time.time()
+    requests_for_email = [ts for ts in OTP_REQUEST_WINDOW.get(email, []) if now - ts < OTP_REQUEST_WINDOW_SECONDS]
+    OTP_REQUEST_WINDOW[email] = requests_for_email
+    return len(requests_for_email) >= OTP_REQUEST_LIMIT
+
+def _update_supabase_password(email: str, new_password: str) -> tuple:
+    if not SUPABASE_URL or not SUPABASE_SERVICE_ROLE_KEY:
+        return False, "Password reset service is not configured"
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json"
+    }
+    try:
+        response = requests.get(f"{SUPABASE_URL.rstrip('/')}/auth/v1/admin/users", headers=headers, timeout=15)
+        response.raise_for_status()
+        users = response.json().get("users", [])
+        user = next((item for item in users if item.get("email", "").lower() == email), None)
+        if not user:
+            return False, "Account not found"
+        update = requests.put(
+            f"{SUPABASE_URL.rstrip('/')}/auth/v1/admin/users/{user['id']}",
+            headers=headers, json={"password": new_password}, timeout=15
+        )
+        update.raise_for_status()
+        return True, "Password updated"
+    except Exception as exc:
+        logger.error(f"Supabase password update failed: {exc}")
+        return False, "Password could not be updated"
 
 def send_brevo_otp_email(to_email: str, otp_code: str) -> tuple:
     """
     Sends transactional email via Brevo (Sendinblue) API v3.
     """
-    if not BREVO_API_KEY:
-        logger.warning("BREVO_API_KEY is missing in environment variables. Simulating email delivery.")
-        return True, "Simulated Brevo delivery (API key not set)"
+    if not BREVO_API_KEY or not BREVO_SENDER_EMAIL:
+        return False, "Email delivery is not configured"
 
     url = "https://api.brevo.com/v3/smtp/email"
     headers = {
@@ -78,23 +150,32 @@ def send_otp():
     if not email:
         return jsonify({"error": "Registered email address is required"}), 400
 
-    # Generate 6-digit OTP
-    otp_code = f"{random.randint(100000, 999999)}"
-    expires_at = time.time() + (10 * 60) # 10 minutes
+    if _rate_limited(email):
+        return jsonify({"error": "Too many OTP requests. Try again later."}), 429
 
-    OTP_CACHE[email] = {
-        "otp": otp_code,
-        "expires_at": expires_at
+    otp_code = f"{secrets.randbelow(900000) + 100000}"
+    expires_at = time.time() + OTP_TTL_SECONDS
+
+    existing = _otp_get(email) or {}
+    same_window = time.time() - existing.get("window_started", 0) < OTP_REQUEST_WINDOW_SECONDS
+    record = {
+        "otp_hash": _otp_hash(email, otp_code),
+        "expires_at": expires_at,
+        "attempts": 0,
+        "verified": False,
+        "request_count": existing.get("request_count", 0) + 1 if same_window else 1,
+        "window_started": existing.get("window_started", time.time()) if same_window else time.time()
     }
+    _otp_save(email, record)
+    OTP_REQUEST_WINDOW.setdefault(email, []).append(time.time())
 
     success, msg = send_brevo_otp_email(email, otp_code)
 
     return jsonify({
         "success": success,
         "message": msg,
-        "email": email,
-        "simulated_otp": otp_code if not BREVO_API_KEY else None
-    }), 200
+        "email": email
+    }), 200 if success else 503
 
 @auth_bp.route("/api/auth/verify-otp", methods=["POST"])
 def verify_otp():
@@ -105,17 +186,24 @@ def verify_otp():
     if not email or not otp_input:
         return jsonify({"error": "Email and OTP code are required"}), 400
 
-    record = OTP_CACHE.get(email)
+    record = _otp_get(email)
     if not record:
         return jsonify({"error": "No OTP request found for this email address"}), 400
 
     if time.time() > record["expires_at"]:
-        OTP_CACHE.pop(email, None)
+        _otp_delete(email)
         return jsonify({"error": "OTP has expired. Please request a new code."}), 400
 
-    if record["otp"] != otp_input:
+    record["attempts"] += 1
+    _otp_save(email, record)
+    if record["attempts"] > OTP_MAX_ATTEMPTS:
+        _otp_delete(email)
+        return jsonify({"error": "Too many invalid attempts. Request a new OTP."}), 429
+    if not secrets.compare_digest(record["otp_hash"], _otp_hash(email, otp_input)):
         return jsonify({"error": "Invalid OTP code. Please check your email."}), 400
 
+    record["verified"] = True
+    _otp_save(email, record)
     return jsonify({"success": True, "message": "OTP verified successfully"}), 200
 
 @auth_bp.route("/api/auth/reset-password", methods=["POST"])
@@ -128,12 +216,19 @@ def reset_password():
     if not email or not otp_input or not new_password:
         return jsonify({"error": "Email, OTP code, and new_password are required"}), 400
 
-    record = OTP_CACHE.get(email)
-    if not record or record["otp"] != otp_input:
+    record = _otp_get(email)
+    if not record or time.time() > record.get("expires_at", 0) or not record.get("verified") or not secrets.compare_digest(record["otp_hash"], _otp_hash(email, otp_input)):
         return jsonify({"error": "Invalid or expired OTP session"}), 400
 
+    if len(new_password) < 8:
+        return jsonify({"error": "Password must contain at least 8 characters"}), 400
+
+    success, message = _update_supabase_password(email, new_password)
+    if not success:
+        return jsonify({"error": message}), 503
+
     # Clear OTP
-    OTP_CACHE.pop(email, None)
-    logger.info(f"Password reset successfully completed for email {email}")
+    _otp_delete(email)
+    logger.info("Password reset successfully completed")
 
     return jsonify({"success": True, "message": "Password reset successfully. You can now log in."}), 200

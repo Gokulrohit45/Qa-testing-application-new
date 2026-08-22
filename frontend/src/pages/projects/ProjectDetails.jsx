@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import html2pdf from 'html2pdf.js';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  TestCaseService, AIService, ExecutionService, ProjectService, AssetService
+  TestCaseService, AIService, ExecutionService, ProjectService, AssetService, localAssetUrl
 } from '../../services/api';
 import {
   Play, Sparkles, ArrowLeft, RefreshCw, CheckCircle2, XCircle,
@@ -161,13 +161,16 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
       }
       const res = await ExecutionService.triggerExecution({
         project_id: project.id,
+        test_id: targetTc?.id,
+        user_id: project.user_id,
         app_url: project.app_url,
         steps: stepsToRun.length > 0 ? stepsToRun : [
           { action: 'goto', target: project.app_url, value: '', raw_command: `Navigate to ${project.app_url}` }
         ],
         face_auth_enabled: project.face_auth_enabled,
         y4m_path: project.video_file_path || videoPath,
-        headless
+        headless,
+        timeout_seconds: Number(timeoutSec)
       });
       if (res?.execution_id) {
         setExecutionId(res.execution_id);
@@ -229,7 +232,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
       if (log.screenshot_url) {
         imgHtml = `
           <div style="margin-top: 12px; border-radius: 8px; overflow: hidden; border: 1px solid #cbd5e1; max-width: 500px; background: #f8fafc;">
-            <img src="http://127.0.0.1:5000${log.screenshot_url}" style="width: 100%; height: auto; display: block;" />
+            <img src="${localAssetUrl(log.screenshot_url)}" style="width: 100%; height: auto; display: block;" />
           </div>
         `;
       }
@@ -426,6 +429,9 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
             setResultsDate(new Date().toISOString());
             setFinalDuration(res.duration_ms ? Math.round(res.duration_ms / 1000) : Math.round((Date.now() - startTimeRef.current) / 1000));
             ExecutionService.getExecutionHistory(id).then(setExecHistory);
+            const completedTc = testCases.find(tc => String(tc.id) === String(selectedTestCaseId));
+            ExecutionService.syncCompletedExecution(execId, id, completedTc?.id, res)
+              .catch(error => console.warn('Cloud execution sync pending:', error.message));
           }
         }
       } catch (err) { console.error('Polling error:', err); }
@@ -758,7 +764,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
                     {(project.video_file_path || videoPath) ? (
                       <div className="space-y-3">
                         <video controls muted preload="metadata" crossOrigin="anonymous"
-                          src={`http://127.0.0.1:5000/api/videos/${(videoPath || project.video_file_path).split(/[\/\\]/).pop().replace('.y4m', '.mp4')}`}
+                          src={localAssetUrl(`/api/videos/${(videoPath || project.video_file_path).split(/[\/\\]/).pop().replace('.y4m', '.mp4')}`)}
                           className="w-full max-h-48 rounded-lg border border-slate-800 bg-black" />
                         <div className="flex gap-2">
                           <label className="flex-1 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold text-center cursor-pointer transition-colors flex items-center justify-center gap-1.5">
@@ -1288,7 +1294,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
                         <div className="flex items-center gap-2 flex-shrink-0">
                           <span className="text-[10px] text-muted">{log.duration_ms}ms</span>
                           {log.screenshot_url && (
-                            <button onClick={() => setSelectedScreenshot(`http://127.0.0.1:5000${log.screenshot_url}`)}
+                            <button onClick={() => setSelectedScreenshot(localAssetUrl(log.screenshot_url))}
                               className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1">
                               <Eye size={12}/> Screenshot
                             </button>
@@ -1435,7 +1441,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
                             <div className="flex items-center gap-3">
                               <span className="text-muted text-[10px]">{log.duration_ms}ms</span>
                               {log.screenshot_url && (
-                                <button onClick={() => setSelectedScreenshot(`http://127.0.0.1:5000${log.screenshot_url}`)}
+                                <button onClick={() => setSelectedScreenshot(localAssetUrl(log.screenshot_url))}
                                   className="text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1">
                                   <Eye size={12}/> Screenshot
                                 </button>
@@ -1669,7 +1675,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
                           )}
                           {includeScreenshots && log.screenshot_url && (
                             <div className="mt-3 border border-slate-200 rounded-lg overflow-hidden max-w-lg bg-slate-50">
-                              <img src={`http://127.0.0.1:5000${log.screenshot_url}`} alt={`Step #${index+1}`} className="w-full h-auto" />
+                              <img src={localAssetUrl(log.screenshot_url)} alt={`Step #${index+1}`} className="w-full h-auto" />
                             </div>
                           )}
                         </div>

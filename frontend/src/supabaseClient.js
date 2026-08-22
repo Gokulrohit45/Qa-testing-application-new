@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+const supabaseUrl = window.qaDesktop?.supabaseUrl || import.meta.env.VITE_SUPABASE_URL || '';
+const supabaseAnonKey = window.qaDesktop?.supabaseAnonKey || import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
 export const supabase = createClient(
   supabaseUrl || 'https://placeholder.supabase.co',

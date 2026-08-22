@@ -5,3 +5,12 @@ dist/
 __pycache__/
 *.pyc
 .qa_ai_platform/
+.build-venv/
+frontend/release/
+backend/playwright-browsers/
+backend/dist/
+.python-runtime/
+python-installer.exe
+/.smoke-data/
+/build/
+/*.spec

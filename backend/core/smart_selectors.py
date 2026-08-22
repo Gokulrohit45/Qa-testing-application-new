@@ -62,10 +62,11 @@ def smart_fill(page, target: str, value: str, timeout: int = 6000) -> bool:
 
     # Deduplicate selectors list while keeping order
     unique_selectors = list(dict.fromkeys(selectors))
+    attempt_timeout = max(200, min(1200, timeout // max(1, len(unique_selectors))))
 
     for sel in unique_selectors:
         try:
-            elem = page.wait_for_selector(sel, timeout=1200, state="visible")
+            elem = page.wait_for_selector(sel, timeout=attempt_timeout, state="visible")
             if elem:
                 elem.scroll_into_view_if_needed()
                 elem.click()
@@ -77,7 +78,7 @@ def smart_fill(page, target: str, value: str, timeout: int = 6000) -> bool:
                     }""", elem)
                 except Exception:
                     pass
-                logger.info(f"smart_fill succeeded with selector: '{sel}' for value: '{val_str}'")
+                logger.info(f"smart_fill succeeded with selector: '{sel}'")
                 return True
         except Exception as e:
             continue
@@ -89,7 +90,7 @@ def smart_fill(page, target: str, value: str, timeout: int = 6000) -> bool:
         return True
     except Exception as e:
         logger.error(f"smart_fill failed to find input matching target '{target}': {e}")
-        raise RuntimeError(f"Could not locate input field matching '{target}'. Checked selectors: {unique_selectors[:4]}")
+        raise RuntimeError(f"Could not locate input field matching '{target}'")
 
 
 def smart_click(page, target: str, timeout: int = 6000) -> bool:
@@ -122,20 +123,21 @@ def smart_click(page, target: str, timeout: int = 6000) -> bool:
         selectors.insert(4, "button:has-text('Login')")
 
     unique_selectors = list(dict.fromkeys(selectors))
+    attempt_timeout = max(200, min(1200, timeout // max(1, len(unique_selectors))))
 
     for sel in unique_selectors:
         try:
-            elem = page.wait_for_selector(sel, timeout=1200, state="visible")
+            elem = page.wait_for_selector(sel, timeout=attempt_timeout, state="visible")
             if elem:
                 elem.scroll_into_view_if_needed()
-                elem.click(force=True)
+                elem.click()
                 logger.info(f"smart_click succeeded with selector: '{sel}'")
                 return True
         except Exception as e:
             continue
 
     try:
-        page.click(target, timeout=2000, force=True)
+        page.click(target, timeout=min(timeout, 2000))
         logger.info(f"smart_click fallback page.click succeeded for target '{target}'")
         return True
     except Exception as e:
