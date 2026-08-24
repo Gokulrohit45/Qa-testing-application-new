@@ -41,9 +41,12 @@ export default function Header({ selectedProject }) {
     { label: 'Home', to: '/dashboard' },
     ...segments.map((seg, i) => {
       const to = '/' + segments.slice(0, i + 1).join('/');
-      const label = isNaN(seg)
-        ? seg.charAt(0).toUpperCase() + seg.slice(1)
-        : selectedProject?.name || `#${seg}`;
+      const isProjectIdentifier = segments[i - 1] === 'projects';
+      const label = isProjectIdentifier
+        ? selectedProject?.name || `Project #${seg.slice(0, 8)}`
+        : isNaN(seg)
+          ? seg.charAt(0).toUpperCase() + seg.slice(1)
+          : `#${seg}`;
       return { label, to };
     }),
   ];
@@ -58,7 +61,7 @@ export default function Header({ selectedProject }) {
       <div className="flex items-center gap-1.5 text-xs font-medium text-muted">
         {crumbs.map((c, i) => (
           <React.Fragment key={c.to}>
-            {i > 0 && <ChevronRight size={12} className="text-slate-300 dark:text-zinc-700" />}
+            {i > 0 && <ChevronRight size={12} className="text-slate-500 dark:text-zinc-600" />}
             {i === crumbs.length - 1 ? (
               <span className="text-primary font-semibold">{c.label}</span>
             ) : (

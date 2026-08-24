@@ -68,9 +68,9 @@
 
   /* Text colors */
   .text-primary      { @apply text-slate-900  dark:text-zinc-100; }
-  .text-secondary    { @apply text-slate-500  dark:text-zinc-400; }
-  .text-muted        { @apply text-slate-400  dark:text-zinc-500; }
-  .text-label        { @apply text-slate-500  dark:text-zinc-500; }
+  .text-secondary    { @apply text-slate-700  dark:text-zinc-400; }
+  .text-muted        { @apply text-slate-600  dark:text-zinc-500; }
+  .text-label        { @apply text-slate-700  dark:text-zinc-500; }
 
   /* Borders / Dividers (Subtle transparent dividers instead of lines) */
   .border-base       { @apply border-none; }
@@ -79,7 +79,7 @@
 
   /* Sidebar item with softer shapes */
   .nav-item-active   { @apply bg-indigo-50/80 text-indigo-700 rounded-2xl dark:bg-indigo-500/10 dark:text-indigo-400; }
-  .nav-item-idle     { @apply text-slate-500 hover:bg-slate-100 hover:text-slate-900 rounded-2xl dark:text-zinc-500 dark:hover:bg-[#161925] dark:hover:text-zinc-200; }
+  .nav-item-idle     { @apply text-slate-700 hover:bg-slate-100 hover:text-slate-950 rounded-2xl dark:text-zinc-500 dark:hover:bg-[#161925] dark:hover:text-zinc-200; }
 
   /* Softer Buttons */
   .btn-primary {
@@ -91,7 +91,7 @@
   }
   .btn-ghost {
     @apply flex items-center gap-2 px-4 py-2.5 rounded-2xl font-semibold text-sm;
-    @apply bg-slate-100/80 text-slate-700;
+    @apply bg-slate-100/80 text-slate-900;
     @apply hover:bg-slate-200/80;
     @apply dark:bg-[#161925] dark:text-zinc-300;
     @apply dark:hover:bg-[#1d2132];
@@ -104,7 +104,7 @@
   .badge-error   { @apply bg-red-100/80 text-red-700 dark:bg-red-500/10 dark:text-red-400; }
   .badge-warning { @apply bg-amber-100/80 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400; }
   .badge-indigo  { @apply bg-indigo-50 text-indigo-700 dark:bg-indigo-500/10 dark:text-indigo-400; }
-  .badge-neutral { @apply bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400; }
+  .badge-neutral { @apply bg-slate-100 text-slate-800 dark:bg-zinc-800 dark:text-zinc-400; }
 
   /* Code structure */
   .terminal {
@@ -116,7 +116,7 @@
   }
 
   .section-label {
-    @apply text-[10px] font-bold uppercase tracking-widest text-slate-400 dark:text-zinc-600;
+    @apply text-[10px] font-bold uppercase tracking-widest text-slate-600 dark:text-zinc-500;
   }
 
   /* Table style updates */

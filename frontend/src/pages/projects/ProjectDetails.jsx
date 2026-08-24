@@ -29,6 +29,12 @@ const isSkippedLog = log => ['skipped', 'Skipped'].includes(log?.status);
 function classifyFailure(log) {
   if (!log) return { category: 'none', recommendation: 'No failed UI step was recorded.' };
   const text = `${log.action || ''} ${log.target || ''} ${log.error_message || ''}`.toLowerCase();
+  if (/blocked by|overlay|intercepts pointer|covered/.test(text)) {
+    return { category: 'Blocked by overlay', recommendation: 'Dismiss the open menu or overlay, confirm it closed, then retry the intended control.' };
+  }
+  if (/ambiguous click target|multiple matching|accessible name/.test(text)) {
+    return { category: 'Ambiguous control', recommendation: 'Replace the symbol or generic label with the control accessible name and its section or purpose.' };
+  }
   if (log.action === 'upload_file' || /asset|upload|file.*not found|ambiguous/.test(text)) {
     return { category: 'File upload', recommendation: 'Confirm the named project asset exists, then inspect the target page file input and the failure screenshot.' };
   }
@@ -42,6 +48,33 @@ function classifyFailure(log) {
     return { category: 'Element resolution', recommendation: 'Inspect the failure screenshot and use the element visible label, role, placeholder, or a stable test ID.' };
   }
   return { category: 'Runtime', recommendation: 'Review the exact error and screenshot; reproduce the step once in headed mode to inspect the page state.' };
+}
+
+function networkRecommendation(group) {
+  const status = Number(group.status || 0);
+  const url = String(group.url || '');
+  if (/generativelanguage\.googleapis\.com/i.test(url) && status === 404) {
+    return 'Verify the configured Gemini model name and API endpoint; the requested model resource returned 404.';
+  }
+  if (/upload/i.test(url) && status >= 500) {
+    return `Inspect the ${group.source || 'observed service'} upload endpoint logs, request payload, file-size limits, and server storage; the endpoint returned a server error.`;
+  }
+  if (status === 401 || status === 403) return 'Verify the target application session, token, and endpoint permissions.';
+  if (status === 404) return 'Verify the endpoint path and deployed API version.';
+  if (status >= 500) return `Inspect the ${group.source || 'observed service'} logs and dependency/database health for this endpoint.`;
+  return 'Inspect connectivity, CORS, DNS, and the request failure details.';
+}
+
+function networkSource(projectUrl, requestUrl) {
+  try {
+    const requestHost = new URL(requestUrl).host.toLowerCase();
+    const targetHost = projectUrl ? new URL(projectUrl).host.toLowerCase() : '';
+    if (requestHost === targetHost) return 'Target application';
+    if (/qa-testing-application-new.*\.onrender\.com$/.test(requestHost) || /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(requestHost)) return 'QA-AI platform';
+    return 'Third-party service';
+  } catch (_) {
+    return 'Unclassified observed service';
+  }
 }
 
 export default function ProjectDetails({ projects = [], onDeleteProject, onSelectProject }) {
@@ -767,7 +800,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
       <div className="p-8 flex items-center justify-center h-full">
         <div className="text-center">
           <AlertCircle className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-          <p className="text-slate-400 text-xs">Project not found.</p>
+          <p className="text-slate-600 dark:text-slate-400 text-xs">Project not found.</p>
           <button onClick={() => navigate('/')} className="mt-4 text-xs text-indigo-400 hover:underline">
             Back to Dashboard
           </button>
@@ -804,13 +837,13 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
         <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-5">
           <div className="space-y-3">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="badge badge-indigo">Project #{project.id}</span>
-              <span className="text-slate-400 text-xs font-medium">{project.app_name || project.name}</span>
+              <span className="badge badge-indigo" title={`Full project ID: ${project.id}`}>Project #{String(project.id).slice(0, 8)}</span>
+              <span className="text-slate-600 dark:text-slate-400 text-xs font-medium">{project.app_name || project.name}</span>
               <span className="badge badge-indigo">🔐 Username &amp; Password{project.face_auth_enabled ? ' + 📷 Face Auth Enabled' : ''}</span>
             </div>
             <h1 className="text-2xl font-black text-white tracking-tight leading-snug">{project.name}</h1>
             <a href={project.app_url} target="_blank" rel="noreferrer"
-               className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-400 transition-colors font-mono font-medium">
+               className="inline-flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors font-mono font-medium">
               <Globe size={13}/>{project.app_url}
             </a>
           </div>
@@ -829,7 +862,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
         <div className="relative z-10 mt-6 pt-5 border-t border-white/10 grid grid-cols-3 gap-4 max-w-sm">
           {[{label:'Success Rate',value:`${rate}%`},{label:'Test Cases',value:testCases.length},{label:'Total Runs',value:totalRuns}].map(s => (
             <div key={s.label}>
-              <p className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider">{s.label}</p>
+              <p className="text-[10px] text-slate-600 dark:text-slate-400 uppercase font-semibold tracking-wider">{s.label}</p>
               <p className="text-lg font-black text-white mt-0.5">{s.value}</p>
             </div>
           ))}
@@ -876,7 +909,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                     <h2 className="text-sm font-bold text-white flex items-center gap-1.5">
                       <span>🔐 Authentication Configuration</span>
                     </h2>
-                    <p className="text-xs text-slate-400">Configure optional Face Verification &amp; virtual media stream for this project.</p>
+                    <p className="text-xs text-slate-600 dark:text-slate-400">Configure optional Face Verification &amp; virtual media stream for this project.</p>
                   </div>
                   <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold ${
                     project.face_auth_enabled ? 'bg-indigo-600 text-white' : 'bg-slate-700 text-slate-300'
@@ -892,7 +925,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                   </div>
                   <div className="p-3 rounded-lg bg-slate-800/80 border border-slate-700">
                     <p className="font-bold text-indigo-400 mb-1">☑ Biometric Face Verification (Optional)</p>
-                    <p className="text-[11px] text-slate-400">Automated virtual webcam input stream for 2-Factor Face Auth logins.</p>
+                    <p className="text-[11px] text-slate-600 dark:text-slate-400">Automated virtual webcam input stream for 2-Factor Face Auth logins.</p>
                   </div>
                 </div>
                 {project.face_auth_enabled && (
@@ -1455,7 +1488,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                               <Eye size={12}/> Screenshot
                             </button>
                           )}
-                          <span className={`badge ${isFailed ? 'badge-error' : 'badge-success'} text-[10px]`}>
+                          <span className={`badge ${isFailed ? 'badge-error' : isSkipped ? 'badge-warning' : 'badge-success'} text-[10px]`}>
                             {log.status?.toUpperCase() || 'RUNNING'}
                           </span>
                         </div>
@@ -1480,11 +1513,14 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                   <div className="p-4 font-mono text-[11px] space-y-1.5 overflow-y-auto scrollbar-thin text-zinc-300 flex-1">
                     {executionLogs.map((log, i) => {
                       const isFailed = log.status === 'failed' || log.status === 'Failed';
+                      const isSkipped = isSkippedLog(log);
                       return (
                         <div key={i} className="flex items-start gap-1">
                           <span className="text-zinc-500 flex-shrink-0">[{(log.created_at || log.timestamp) ? new Date(log.created_at || log.timestamp).toLocaleTimeString() : '--:--:--'}]</span>
                           {isFailed ? (
                             <span className="text-red-400">✗ Step #{i+1} {log.action}: failed in {log.duration_ms}ms</span>
+                          ) : isSkipped ? (
+                            <span className="text-amber-400">- Step #{i+1} {log.action}: skipped ({log.error_message || 'dependent state unavailable'})</span>
                           ) : (
                             <span className="text-emerald-400">✓ Step #{i+1} {log.action}: passed in {log.duration_ms}ms</span>
                           )}
@@ -1511,13 +1547,30 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
           const skippedCount = resultsLogs.filter(isSkippedLog).length;
           const auditedCount = passedCount + failedCount;
           const successRate = auditedCount > 0 ? Math.round((passedCount / auditedCount) * 100) : 0;
-          const resultsHasFailures = failedCount > 0;
-          const failedStep = resultsLogs.find(isFailedLog);
-          const failure = classifyFailure(failedStep);
+          const normalizedResultsStatus = String(resultsStatus || '').toLowerCase();
+          const resultsHasFailures = failedCount > 0 || ['failed', 'stopped', 'cancelled'].includes(normalizedResultsStatus);
+          const failedSteps = resultsLogs.filter(isFailedLog);
           const httpSpans = resultsTelemetry.filter(span => span?.attributes?.type === 'http');
           const networkFailures = httpSpans.filter(span =>
             String(span.status_code).toUpperCase() === 'ERROR' || Number(span?.attributes?.http_status || 0) >= 400
           );
+          const groupedNetworkFailures = Object.values(networkFailures.reduce((groups, span) => {
+            const attrs = span.attributes || {};
+            const key = `${attrs.method || 'REQUEST'}|${attrs.url || span.name}|${attrs.http_status || 'transport'}`;
+            if (!groups[key]) groups[key] = {
+              key, method: attrs.method || 'REQUEST', url: attrs.url || span.name,
+              status: attrs.http_status || 'transport failure', count: 0,
+              steps: new Set(), duration: 0
+            };
+            groups[key].count += 1;
+            if (attrs.step_number) groups[key].steps.add(attrs.step_number);
+            groups[key].duration = Math.max(groups[key].duration, Number(span.duration_ms || 0));
+            return groups;
+          }, {})).map(group => ({
+            ...group,
+            steps: [...group.steps].sort((a, b) => a - b),
+            source: networkSource(project?.app_url, group.url)
+          }));
           const loginFill = resultsLogs.find(log => log.action === 'fill' && /email|user|login/.test(String(log.target).toLowerCase()));
           const passwordFill = resultsLogs.find(log => log.action === 'fill' && /password|passwd|pwd/.test(String(log.target).toLowerCase()));
           const authRows = [
@@ -1552,7 +1605,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                   <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800 pb-3">
                     <h3 className="section-label">Execution Summary</h3>
                     <span className={`badge ${resultsHasFailures ? 'badge-error' : 'badge-success'}`}>
-                      {resultsHasFailures ? 'Failed' : 'Passed'}
+                      {normalizedResultsStatus === 'stopped' ? 'Stopped' : resultsHasFailures ? 'Failed' : 'Passed'}
                     </span>
                   </div>
                   <div className="space-y-2 text-xs font-mono text-secondary">
@@ -1630,6 +1683,12 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                               {log.error_message}
                             </div>
                           )}
+                          {isSkipped && (
+                            <div className="mt-2.5 p-3 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 text-[11px] leading-relaxed">
+                              <span className="font-bold block mb-1">SKIP REASON</span>
+                              {log.error_message || 'Skipped because a required earlier page state was unavailable.'}
+                            </div>
+                          )}
                         </div>
                       );
                     })
@@ -1668,12 +1727,18 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                     <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-1">
                       <span className="text-red-600 dark:text-red-400 font-bold block">🔴 FRONTEND FINDING (Playwright):</span>
                       {resultsHasFailures ? (
-                        <>
-                          <p className="text-secondary">Root category: {failure.category}.</p>
-                          <p className="text-secondary">Failed action "{failedStep?.action}" for target "{failedStep?.target || 'N/A'}".</p>
-                          <p className="text-secondary">{failedStep?.error_message}</p>
+                        <div className="space-y-3">
+                          {failedSteps.map((failedStep, index) => {
+                            const failure = classifyFailure(failedStep);
+                            return <div key={failedStep.id || index} className="rounded-lg border border-red-200 dark:border-red-500/20 bg-white dark:bg-black/10 p-3 space-y-1">
+                              <p className="font-bold text-red-700 dark:text-red-300">Step #{failedStep.step_number || resultsLogs.indexOf(failedStep) + 1}: {String(failedStep.action || 'action').toUpperCase()} {failedStep.target ? `— ${failedStep.target}` : ''}</p>
+                              <p className="text-secondary">Category: {failure.category} · Duration: {failedStep.duration_ms || 0}ms</p>
+                              <p className="text-secondary break-words">{failedStep.error_message || 'No detailed error was recorded.'}</p>
+                              {failedStep.screenshot_url && <button onClick={() => setSelectedScreenshot(localAssetUrl(failedStep.screenshot_url))} className="text-indigo-700 dark:text-indigo-400 hover:underline">View failure screenshot</button>}
+                            </div>;
+                          })}
                           {skippedCount > 0 && <p className="text-secondary">{skippedCount} dependent step(s) were skipped to avoid misleading cascade failures.</p>}
-                        </>
+                        </div>
                       ) : (
                         <p className="text-secondary">1. All test steps completed successfully with zero page assertion failures.</p>
                       )}
@@ -1681,7 +1746,9 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                     <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-1">
                       <span className="text-amber-600 dark:text-amber-400 font-bold block">💡 FRONTEND RECOMMENDED FIX:</span>
                       {resultsHasFailures ? (
-                        <p className="text-secondary">{failure.recommendation}</p>
+                        <div className="space-y-2">
+                          {failedSteps.map((failedStep, index) => <p key={failedStep.id || index} className="text-secondary"><span className="font-bold text-primary">Step #{failedStep.step_number || resultsLogs.indexOf(failedStep) + 1}:</span> {classifyFailure(failedStep).recommendation}</p>)}
+                        </div>
                       ) : (
                         <p className="text-secondary">1. UI state healthy. Maintain selector stability.</p>
                       )}
@@ -1691,7 +1758,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
 
                 <div className="card p-6 space-y-4">
                   <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800 pb-3">
-                    <h3 className="section-label">Backend OpenTelemetry Diagnostics</h3>
+                    <h3 className="section-label">Observed Network &amp; OpenTelemetry Diagnostics</h3>
                     <span className="badge badge-indigo">Observed Browser Traffic</span>
                   </div>
                   <div className="space-y-3 text-xs">
@@ -1700,9 +1767,12 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                       {networkFailures.length > 0 ? (
                         <>
                           <p className="text-secondary">{networkFailures.length} observed request(s) returned an error.</p>
-                          {networkFailures.slice(0, 3).map((span, index) => (
-                            <p key={span.id || index} className="text-secondary">{span.attributes?.method || 'REQUEST'} {span.attributes?.url || span.name}: HTTP {span.attributes?.http_status || 'transport failure'}</p>
-                          ))}
+                          {groupedNetworkFailures.map(group => {
+                            return <div key={group.key} className="rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-black/10 p-3 space-y-1">
+                              <p className="font-bold text-primary">{group.source}: {group.method} {group.url}</p>
+                              <p className="text-secondary">HTTP {group.status} · {group.count} occurrence(s){group.steps.length ? ` · Step(s) ${group.steps.join(', ')}` : ''} · Slowest ${group.duration}ms</p>
+                            </div>;
+                          })}
                         </>
                       ) : httpSpans.length > 0 ? (
                         <p className="text-secondary">{httpSpans.length} browser request(s) were observed with no HTTP or transport failures.</p>
@@ -1713,10 +1783,9 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                     <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-1">
                       <span className="text-violet-600 dark:text-violet-400 font-bold block">⚙ BACKEND RECOMMENDED FIX:</span>
                       {networkFailures.length > 0 ? (
-                        <>
-                          <p className="text-secondary">1. Verify backend API response status codes and database query latency.</p>
-                          <p className="text-secondary">2. Check backend application logs for stack traces.</p>
-                        </>
+                        <div className="space-y-2">
+                          {groupedNetworkFailures.map(group => <p key={group.key} className="text-secondary"><span className="font-bold text-primary">{group.method} {group.url}:</span> {networkRecommendation(group)}</p>)}
+                        </div>
                       ) : (
                         <p className="text-secondary">No network remediation is suggested from the available evidence.</p>
                       )}

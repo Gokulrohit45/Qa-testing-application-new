@@ -116,27 +116,38 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
             
             page = context.new_page()
             request_started = {}
+            current_step = {"number": 0, "action": "browser_start", "target": app_url}
             def request_key(request):
                 return f"{request.method} {request.url}"
             def on_request(request):
-                request_started.setdefault(request_key(request), []).append(time.time())
+                request_started.setdefault(request_key(request), []).append({
+                    "started": time.time(), "step_number": current_step["number"],
+                    "step_action": current_step["action"], "step_target": current_step["target"]
+                })
             def request_start(request):
                 queue = request_started.get(request_key(request), [])
-                started = queue.pop(0) if queue else time.time()
+                observed = queue.pop(0) if queue else {
+                    "started": time.time(), "step_number": current_step["number"],
+                    "step_action": current_step["action"], "step_target": current_step["target"]
+                }
                 if not queue:
                     request_started.pop(request_key(request), None)
-                return started
+                return observed
             def on_response(response):
                 observed = request_start(response.request)
-                spans.append(_new_span(execution_id, trace_id, f"HTTP {response.request.method} {response.url.split('?')[0]}", observed,
+                spans.append(_new_span(execution_id, trace_id, f"HTTP {response.request.method} {response.url.split('?')[0]}", observed["started"],
                     "ERROR" if response.status >= 400 else "OK", {"type": "http", "method": response.request.method,
-                    "url": response.url.split('?')[0], "http_status": response.status}, root_span_id))
+                    "url": response.url.split('?')[0], "http_status": response.status,
+                    "step_number": observed["step_number"], "step_action": observed["step_action"],
+                    "step_target": observed["step_target"]}, root_span_id))
                 _record_telemetry(execution_id, spans)
             def on_request_failed(request):
                 observed = request_start(request)
-                spans.append(_new_span(execution_id, trace_id, f"HTTP FAILED {request.method} {request.url.split('?')[0]}", observed,
+                spans.append(_new_span(execution_id, trace_id, f"HTTP FAILED {request.method} {request.url.split('?')[0]}", observed["started"],
                     "ERROR", {"type": "http", "method": request.method, "url": request.url.split('?')[0],
-                    "failure": str(request.failure or "Request failed")}, root_span_id))
+                    "failure": str(request.failure or "Request failed"),
+                    "step_number": observed["step_number"], "step_action": observed["step_action"],
+                    "step_target": observed["step_target"]}, root_span_id))
                 _record_telemetry(execution_id, spans)
             page.on("request", on_request)
             page.on("response", on_response)
@@ -148,6 +159,7 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
             if app_url:
                 step_start = time.time()
                 step_num = 1
+                current_step.update({"number": step_num, "action": "goto", "target": app_url})
                 screenshot_filename = f"exec_{execution_id}_step_{step_num}.png"
                 screenshot_path = SCREENSHOTS_DIR / screenshot_filename
                 
@@ -200,6 +212,8 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
 
             # Execute translated JSON steps
             if not has_error:
+                consecutive_interaction_failures = 0
+                dependency_blocked_reason = None
                 for step_offset, step in enumerate(steps):
                     idx = len(logs) + 1
                     if execution_id in CANCELLED_EXECUTIONS:
@@ -210,6 +224,24 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                     target = step.get("target", "")
                     value = step.get("value", "")
                     raw_cmd = step.get("raw_command", f"{action} {target} {value}".strip())
+                    current_step.update({"number": idx, "action": action, "target": target})
+
+                    # After a prerequisite menu/control fails, avoid spending the
+                    # full click budget on every dependent option in the same UI
+                    # chain. A synchronization/navigation step starts a new chain.
+                    if dependency_blocked_reason and action in {"click", "fill"}:
+                        logs.append({"id": str(uuid.uuid4()), "execution_id": execution_id,
+                            "step_number": idx, "action": action, "target": target, "value": "",
+                            "raw_command": raw_cmd, "status": "skipped",
+                            "error_message": f"Skipped because a prerequisite interaction failed: {dependency_blocked_reason}",
+                            "screenshot_url": None, "duration_ms": 0,
+                            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")})
+                        EXECUTION_LOGS_CACHE[execution_id] = list(logs)
+                        update_disk_execution_logs(execution_id, logs, status="Running", error_message=global_err_msg)
+                        continue
+                    if action in {"goto", "wait", "verify", "verify_text", "upload_file"}:
+                        dependency_blocked_reason = None
+                        consecutive_interaction_failures = 0
 
                     step_start = time.time()
                     screenshot_filename = f"exec_{execution_id}_step_{idx}.png"
@@ -313,6 +345,13 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                     _record_telemetry(execution_id, spans)
                     EXECUTION_LOGS_CACHE[execution_id] = list(logs)
                     update_disk_execution_logs(execution_id, logs, status="Running")
+                    if action in {"click", "fill"}:
+                        if step_status == "failed":
+                            consecutive_interaction_failures += 1
+                            if "blocked by" in str(step_err).lower() or consecutive_interaction_failures >= 2:
+                                dependency_blocked_reason = f"step #{idx} {action} '{target}' failed"
+                        else:
+                            consecutive_interaction_failures = 0
                     is_critical = bool(step.get("critical")) or action in {"goto", "upload_file"}
                     if step_status == "failed" and is_critical:
                         for skipped in steps[step_offset + 1:]:
