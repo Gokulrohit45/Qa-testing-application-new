@@ -72,7 +72,7 @@ def _record_telemetry(execution_id, spans):
     TELEMETRY_CACHE[execution_id] = list(spans)
     store_upsert("telemetry", {"id": execution_id, "spans": spans})
 
-def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_enabled: bool = False, y4m_path: str = None, headless: bool = True, timeout_seconds: int = 30):
+def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_enabled: bool = False, y4m_path: str = None, headless: bool = True, timeout_seconds: int = 30, expected_step_count: int = None):
     """
     Synchronously runs Playwright actions in background thread, emitting step logs and screenshots.
     If running on Cloud Server without Playwright, delegates execution to Desktop client.
@@ -85,7 +85,10 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
         return
 
     logger.info(f"Starting Playwright execution {execution_id} for URL {app_url}")
-    EXECUTION_STATUS_CACHE[execution_id] = {"status": "Running", "start_time": time.time()}
+    expected_step_count = max(1, int(expected_step_count or (len(steps) + 1)))
+    EXECUTION_STATUS_CACHE[execution_id] = {
+        "status": "Running", "start_time": time.time(), "expected_steps": expected_step_count
+    }
     EXECUTION_LOGS_CACHE[execution_id] = []
 
     start_time = time.time()
@@ -164,7 +167,8 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                         "status": "passed",
                         "error_message": None,
                         "screenshot_url": f"/api/screenshots/{screenshot_filename}",
-                        "duration_ms": step_dur
+                        "duration_ms": step_dur,
+                        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")
                     }
                     logs.append(log_item)
                     spans.append(_new_span(execution_id, trace_id, "playwright.goto", step_start, "OK", {"type": "step", "action": "goto", "target": app_url}, root_span_id))
@@ -184,7 +188,8 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                         "status": "failed",
                         "error_message": str(e),
                         "screenshot_url": None,
-                        "duration_ms": step_dur
+                        "duration_ms": step_dur,
+                        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")
                     }
                     logs.append(log_item)
                     spans.append(_new_span(execution_id, trace_id, "playwright.goto", step_start, "ERROR", {"type": "step", "action": "goto", "target": app_url, "error": str(e)}, root_span_id))
@@ -297,7 +302,8 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                         "error_message": step_err,
                         "screenshot_url": f"/api/screenshots/{screenshot_filename}" if screenshot_path.exists() else None,
                         "before_screenshot_url": f"/api/screenshots/{before_filename}" if before_path.exists() else None,
-                        "duration_ms": step_dur
+                        "duration_ms": step_dur,
+                        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")
                     }
                     logs.append(log_item)
                     spans.append(_new_span(execution_id, trace_id, f"playwright.{action}", step_start,
@@ -314,7 +320,8 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                                 "step_number": len(logs) + 1, "action": str(skipped.get("action", "wait")).lower(),
                                 "target": skipped.get("target", ""), "value": "", "raw_command": skipped.get("raw_command", ""),
                                 "status": "skipped", "error_message": f"Skipped because critical step #{idx} failed: {step_err}",
-                                "screenshot_url": None, "duration_ms": 0})
+                                "screenshot_url": None, "duration_ms": 0,
+                                "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")})
                         EXECUTION_LOGS_CACHE[execution_id] = list(logs)
                         update_disk_execution_logs(execution_id, logs, status="Running", error_message=global_err_msg)
                         break
@@ -330,13 +337,21 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
     if execution_id in CANCELLED_EXECUTIONS:
         final_status = "Stopped"
         global_err_msg = "Execution stopped by user"
+    elif len(logs) < expected_step_count:
+        final_status = "Failed"
+        has_error = True
+        global_err_msg = (
+            f"Execution produced {len(logs)} of {expected_step_count} expected step results. "
+            "The test translation or execution plan is incomplete."
+        )
     else:
         final_status = "Failed" if has_error else "Passed"
     
     EXECUTION_STATUS_CACHE[execution_id] = {
         "status": final_status,
         "error_message": global_err_msg,
-        "duration_ms": total_duration, "trace_id": trace_id
+        "duration_ms": total_duration, "trace_id": trace_id,
+        "expected_steps": expected_step_count
     }
     spans.append({"id": str(uuid.uuid4()), "execution_id": execution_id, "trace_id": trace_id,
         "span_id": root_span_id, "parent_span_id": None, "service_name": "local-playwright-runner",

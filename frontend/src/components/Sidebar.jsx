@@ -33,7 +33,7 @@ export default function Sidebar({ projects, selectedProject, setSelectedProject,
         </div>
         <div>
           <span className="font-bold text-primary text-sm tracking-tight">QA·AI Platform</span>
-          <p className="section-label leading-none mt-0.5">v1.0.4</p>
+          <p className="section-label leading-none mt-0.5">v1.0.5</p>
         </div>
       </div>
 

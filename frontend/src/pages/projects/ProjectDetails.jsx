@@ -60,6 +60,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
   const [executionId, setExecutionId] = useState(null);
   const [executionStatus, setExecutionStatus] = useState(null);
   const [executionLogs, setExecutionLogs] = useState([]);
+  const [executionTotalSteps, setExecutionTotalSteps] = useState(0);
   const [headless, setHeadless] = useState(true);
   const [browserEngine, setBrowserEngine] = useState('Chromium');
   const [timeoutSec, setTimeoutSec] = useState(30);
@@ -242,6 +243,9 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
     setElapsedSeconds(0);
     setEstimateLearning(comparableRuns.length === 0);
     setFinalDuration(0);
+    const commandStepCount = targetTc?.commands?.split('\n').filter(line => line.trim()).length || 0;
+    const configuredStepCount = Math.max(commandStepCount, (targetTc?.cached_json || []).length, 1);
+    setExecutionTotalSteps(configuredStepCount);
     startTimeRef.current = Date.now();
 
     setExecuting(true);
@@ -286,6 +290,8 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
         steps: stepsToRun.length > 0 ? stepsToRun : [
           { action: 'goto', target: project.app_url, value: '', raw_command: `Navigate to ${project.app_url}` }
         ],
+        commands: targetTc?.commands || '',
+        expected_step_count: configuredStepCount,
         face_auth_enabled: project.face_auth_enabled,
         y4m_path: executionVideoPath,
         headless,
@@ -293,6 +299,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
       });
       if (res?.execution_id) {
         setExecutionId(res.execution_id);
+        setExecutionTotalSteps(Number(res.total_steps) || configuredStepCount);
         startPollingLogs(res.execution_id);
       }
     } catch (err) {
@@ -538,6 +545,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
         const res = await ExecutionService.pollExecutionLogs(execId);
         if (res) {
           setExecutionLogs(res.logs || []);
+          if (Number(res.total_steps) > 0) setExecutionTotalSteps(Number(res.total_steps));
           setExecutionStatus(res.status);
           if (['Passed', 'Failed', 'Stopped'].includes(res.status)) {
             clearInterval(pollingRef.current);
@@ -773,12 +781,18 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
   const passed    = execHistory.filter(e => e.status === 'Passed' || e.status === 'passed').length;
   const rate      = totalRuns > 0 ? Math.round((passed / totalRuns) * 100) : 0;
 
-  const totalSteps = selectedTc?.cached_json?.length || selectedTc?.commands?.split('\n').filter(Boolean).length || 1;
-  const finishedSteps = executionLogs.filter(l => ['passed', 'failed'].includes(l.status)).length;
+  const configuredTotalSteps = Math.max(
+    selectedTc?.commands?.split('\n').filter(line => line.trim()).length || 0,
+    selectedTc?.cached_json?.length || 0,
+    1
+  );
+  const totalSteps = executionTotalSteps || configuredTotalSteps;
+  const finishedSteps = executionLogs.filter(l => ['passed', 'failed', 'skipped'].includes(String(l.status).toLowerCase())).length;
   const pendingSteps = Math.max(0, totalSteps - finishedSteps);
   const passedSteps = executionLogs.filter(l => l.status === 'passed').length;
   const failedSteps = executionLogs.filter(l => l.status === 'failed').length;
-  const hasFailures = executionLogs.some(l => l.status === 'failed');
+  const hasFailures = executionStatus === 'Failed' || executionLogs.some(isFailedLog);
+  const isFinalizing = executing && totalSteps > 0 && executionLogs.length >= totalSteps;
 
   return (
     <div className="space-y-6">
@@ -1325,7 +1339,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                 <div>
                   <h3 className="text-sm font-bold text-primary">
                     {executing
-                      ? "Live Execution Running"
+                      ? isFinalizing ? "Finalizing Execution" : "Live Execution Running"
                       : executionStatus === 'Stopped'
                         ? "Live Execution Finished (Stopped)"
                         : hasFailures
@@ -1335,7 +1349,9 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                   </h3>
                   <p className="text-xs text-secondary">
                     {executing
-                      ? "Playwright automating the target web application in real-time"
+                      ? isFinalizing
+                        ? "Closing the browser and saving final results, screenshots, and telemetry."
+                        : "Playwright automating the target web application in real-time"
                       : executionStatus === 'Stopped'
                         ? "The test execution was stopped by user request."
                         : hasFailures
@@ -1407,8 +1423,8 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                     const isFailed = log.status === 'failed' || log.status === 'Failed';
                     const isSkipped = isSkippedLog(log);
                     return (
-                      <div key={i} className={`card !rounded-xl p-3 flex items-center justify-between text-xs font-mono border ${isFailed ? 'border-red-500/30 bg-red-500/5' : 'border-slate-200 dark:border-zinc-800'}`}>
-                        <div className="flex items-center gap-2">
+                      <div key={i} className={`card !rounded-xl p-3 flex items-center justify-between gap-3 min-w-0 text-xs font-mono border ${isFailed ? 'border-red-500/30 bg-red-500/5' : 'border-slate-200 dark:border-zinc-800'}`}>
+                        <div className="flex items-start gap-2 min-w-0 flex-1">
                           {log.status === 'passed' && <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0" />}
                           {log.status === 'failed' && <XCircle size={16} className="text-red-500 flex-shrink-0" />}
                           {isSkipped && <AlertCircle size={16} className="text-amber-500 flex-shrink-0" />}
@@ -1424,14 +1440,14 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                             else params = { target: log.target, value: log.value };
 
                             return (
-                              <span className="text-secondary">
+                              <span className="text-secondary min-w-0 break-words [overflow-wrap:anywhere]">
                                 <span className="text-indigo-600 dark:text-indigo-400 font-bold uppercase">{action === 'goto' && i === 0 ? 'Browser Launch / Network Init' : action}</span>
                                 {" "}{JSON.stringify(params)}
                               </span>
                             );
                           })()}
                         </div>
-                        <div className="flex items-center gap-2 flex-shrink-0">
+                        <div className="flex items-center justify-end gap-2 flex-shrink-0 max-w-[45%]">
                           <span className="text-[10px] text-muted">{log.duration_ms}ms</span>
                           {log.screenshot_url && (
                             <button onClick={() => setSelectedScreenshot(localAssetUrl(log.screenshot_url))}
@@ -1466,7 +1482,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                       const isFailed = log.status === 'failed' || log.status === 'Failed';
                       return (
                         <div key={i} className="flex items-start gap-1">
-                          <span className="text-zinc-500">[{log.timestamp ? new Date(log.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString()}]</span>
+                          <span className="text-zinc-500 flex-shrink-0">[{(log.created_at || log.timestamp) ? new Date(log.created_at || log.timestamp).toLocaleTimeString() : '--:--:--'}]</span>
                           {isFailed ? (
                             <span className="text-red-400">✗ Step #{i+1} {log.action}: failed in {log.duration_ms}ms</span>
                           ) : (
@@ -1477,7 +1493,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                     })}
                     {executing && (
                       <div className="flex items-center gap-1 text-indigo-400 animate-pulse">
-                        <span>Running next step...</span>
+                        <span>{isFinalizing ? 'Finalizing browser and saving results...' : 'Running next step...'}</span>
                         <span className="w-1.5 h-3 bg-indigo-400 animate-pulse" />
                       </div>
                     )}

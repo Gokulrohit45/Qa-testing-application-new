@@ -115,6 +115,8 @@ class ApiTests(unittest.TestCase):
             time.sleep(0.25)
         self.assertEqual(result["status"], "Passed", result.get("error_message"))
         self.assertEqual(len(result["logs"]), 2)
+        self.assertTrue(all(log.get("created_at") for log in result["logs"]))
+        self.assertEqual(result["total_steps"], 2)
 
 if __name__ == "__main__":
     unittest.main()
