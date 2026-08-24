@@ -5,8 +5,8 @@ export default function Home() {
 
   const handleDownloadWindows = () => {
     const link = document.createElement('a');
-    link.href = 'https://github.com/Gokulrohit45/Qa-testing-application-new/releases/download/v1.0.0/QA-AI-Platform-1.0.0-x64.zip';
-    link.download = 'QA-AI-Platform-1.0.0-x64.zip';
+    link.href = 'https://github.com/Gokulrohit45/Qa-testing-application-new/releases/download/v1.0.1/QA-AI-Platform-1.0.1-x64.zip';
+    link.download = 'QA-AI-Platform-1.0.1-x64.zip';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -52,7 +52,7 @@ export default function Home() {
           <button onClick={handleDownloadWindows} className="px-6 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black transition-all flex items-center gap-2.5 shadow-lg shadow-indigo-600/35 hover:-translate-y-0.5">
             <Download size={15}/> Download for Windows (.zip)
           </button>
-          <a href="https://github.com/Gokulrohit45/Qa-testing-application-new/releases/tag/v1.0.0" target="_blank" rel="noopener noreferrer" className="px-6 py-3.5 rounded-2xl bg-slate-900 border border-slate-800 hover:bg-slate-800 hover:border-slate-700 text-white text-xs font-black transition-all flex items-center gap-2.5 hover:-translate-y-0.5">
+          <a href="https://github.com/Gokulrohit45/Qa-testing-application-new/releases/tag/v1.0.1" target="_blank" rel="noopener noreferrer" className="px-6 py-3.5 rounded-2xl bg-slate-900 border border-slate-800 hover:bg-slate-800 hover:border-slate-700 text-white text-xs font-black transition-all flex items-center gap-2.5 hover:-translate-y-0.5">
             <Monitor size={15} className="text-indigo-400"/> View All Releases
           </a>
         </div>
