@@ -37,7 +37,7 @@ or removed before enforcing non-null ownership.
 
 For an existing v1.0.x database, apply
 [`migrations/20260824_project_assets.sql`](migrations/20260824_project_assets.sql)
-once before installing v1.0.3. It creates the private project-assets bucket and
+once before installing v1.0.3 or later. It creates the private project-assets bucket and
 metadata table used to restore uploaded test files on another signed-in device.
 Face videos remain in the private `face-videos` bucket and are restored and
 converted by each desktop engine when required.

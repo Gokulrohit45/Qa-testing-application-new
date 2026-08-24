@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import create_app
 from core.playwright_runner import PLAYWRIGHT_AVAILABLE
+from routes.translate_routes import fallback_heuristic_parser, normalize_steps
 
 class _TargetHandler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -74,6 +75,27 @@ class ApiTests(unittest.TestCase):
             "steps": [{"action": "arbitrary_code"}]
         })
         self.assertEqual(response.status_code, 400)
+
+    def test_upload_file_command_is_parsed_as_upload(self):
+        command = 'upload_file "file" using "Sales_Transactions_50K_550days"'
+        steps = fallback_heuristic_parser(command)
+        self.assertEqual(len(steps), 1)
+        self.assertEqual(steps[0]["action"], "upload_file")
+        self.assertEqual(steps[0]["target"], "input[type='file']")
+        self.assertEqual(steps[0]["value"], "Sales_Transactions_50K_550days")
+
+    def test_legacy_cached_click_upload_is_repaired_before_execution(self):
+        command = 'upload_file "file" using "Sales_Transactions_50K_550days"'
+        stale_steps = [{
+            "action": "click",
+            "target": command,
+            "value": "",
+            "raw_command": command
+        }]
+        repaired = normalize_steps(stale_steps)
+        self.assertEqual(repaired[0]["action"], "upload_file")
+        self.assertEqual(repaired[0]["target"], "input[type='file']")
+        self.assertEqual(repaired[0]["value"], "Sales_Transactions_50K_550days")
 
     @unittest.skipUnless(PLAYWRIGHT_AVAILABLE, "Playwright not installed")
     def test_real_playwright_execution(self):

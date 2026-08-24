@@ -16,6 +16,7 @@ from core.playwright_runner import (
 )
 from utils.logger import logger
 from utils.local_store import list_records, upsert, get
+from routes.translate_routes import normalize_steps
 
 def _normalized_asset_name(value):
     from pathlib import Path
@@ -63,6 +64,11 @@ def trigger_execution():
     parsed_url = urlparse(app_url)
     if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
         return jsonify({"error": "app_url must be a valid HTTP or HTTPS URL"}), 400
+    # Test cases can contain cached JSON produced by an older parser. Always
+    # normalize again at execution time so legacy steps such as a CLICK whose
+    # raw command starts with ``upload_file`` are repaired before validation
+    # and asset resolution.
+    steps = normalize_steps([dict(step) if isinstance(step, dict) else step for step in steps])
     allowed_actions = {"goto", "click", "fill", "wait", "verify", "verify_text", "upload_file"}
     invalid_actions = [step.get("action") for step in steps if not isinstance(step, dict) or str(step.get("action", "")).lower() not in allowed_actions]
     if invalid_actions:
