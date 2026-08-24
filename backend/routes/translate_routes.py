@@ -16,8 +16,22 @@ def fallback_heuristic_parser(raw_text: str) -> list:
     for line in lines:
         cmd_lower = line.lower()
 
+        # File upload must be detected before click/fill because natural-language
+        # commands often contain words such as "click upload" around it.
+        if "upload_file" in cmd_lower or "upload file" in cmd_lower or "attach file" in cmd_lower:
+            quoted = re.findall(r'["\']([^"\']+)["\']', line)
+            using_match = re.search(r'(?:using|with|from)\s+["\']?([^"\']+?)["\']?\s*$', line, re.IGNORECASE)
+            selector_match = re.search(r'(?:upload_file|upload file|attach file)\s+["\']?([^"\']+?)["\']?\s+(?:using|with|from)', line, re.IGNORECASE)
+            target = selector_match.group(1).strip() if selector_match else "input[type='file']"
+            if target.lower() in {"file", "dataset", "upload"}:
+                target = "input[type='file']"
+            value = using_match.group(1).strip() if using_match else (quoted[-1] if quoted else "")
+            steps.append({
+                "action": "upload_file", "target": target, "value": value,
+                "raw_command": line, "critical": True
+            })
         # Goto / Navigate
-        if "navigate to" in cmd_lower or "open" in cmd_lower or "goto" in cmd_lower or "visit" in cmd_lower:
+        elif "navigate to" in cmd_lower or "open" in cmd_lower or "goto" in cmd_lower or "visit" in cmd_lower:
             urls = re.findall(r'https?://[^\s]+', line)
             url = urls[0] if urls else line.replace("Navigate to", "").replace("open", "").replace("goto", "").strip()
             steps.append({
@@ -70,7 +84,7 @@ def fallback_heuristic_parser(raw_text: str) -> list:
             })
         # Verify / Check / Assert
         elif "verify" in cmd_lower or "assert" in cmd_lower or "check" in cmd_lower or "see" in cmd_lower:
-            target = re.sub(r'^(verify|assert|check|see)\s+(that\s+)?', '', line, flags=re.IGNORECASE).strip(" '\"")
+            target = re.sub(r'^(verify|assert|check|see)\s+(that\s+)?(?:text\s+)?', '', line, flags=re.IGNORECASE).strip(" '\"")
             steps.append({
                 "action": "verify",
                 "target": target,
@@ -86,6 +100,35 @@ def fallback_heuristic_parser(raw_text: str) -> list:
             })
 
     return steps
+
+def normalize_steps(steps: list) -> list:
+    """Normalize AI output into the runner's strict, deterministic contract."""
+    normalized = []
+    for original in steps if isinstance(steps, list) else []:
+        if not isinstance(original, dict):
+            continue
+        step = dict(original)
+        raw = str(step.get("raw_command") or "").strip()
+        action = str(step.get("action") or "").lower().strip()
+        target = str(step.get("target") or "").strip()
+        value = str(step.get("value") or "").strip()
+        combined = " ".join([raw, target, value]).lower()
+
+        if "upload_file" in combined or "upload file" in combined or "attach file" in combined:
+            reparsed = fallback_heuristic_parser(raw or f"upload_file {target} using {value}")
+            step = reparsed[0] if reparsed else step
+            action = "upload_file"
+        if action in {"verify", "verify_text"}:
+            target = str(step.get("target") or step.get("value") or "").strip()
+            target = re.sub(r'^(?:verify_text|verify|assert|check)\s*:?\s*', '', target, flags=re.IGNORECASE)
+            target = re.sub(r'^text\s+', '', target, flags=re.IGNORECASE).strip(" '\"")
+            step["target"], step["value"] = target, ""
+        step["action"] = action
+        step.setdefault("target", target)
+        step.setdefault("value", value)
+        step.setdefault("raw_command", raw or f"{action} {target} {value}".strip())
+        normalized.append(step)
+    return normalized
 
 @translate_bp.route("/api/translate", methods=["POST"])
 def translate_prompt():
@@ -122,12 +165,12 @@ def translate_prompt():
             text = re.sub(r'^```\s*', '', text, flags=re.IGNORECASE)
             text = re.sub(r'\s*```$', '', text)
 
-            steps = json.loads(text)
+            steps = normalize_steps(json.loads(text))
             logger.info("Gemini API successfully translated natural language steps.")
             return jsonify({"steps": steps, "source": "gemini"}), 200
         except Exception as e:
             logger.warning(f"Gemini API translation error: {e}. Falling back to heuristic parser.")
 
     # Fallback to local heuristic parser
-    steps = fallback_heuristic_parser(prompt)
+    steps = normalize_steps(fallback_heuristic_parser(prompt))
     return jsonify({"steps": steps, "source": "heuristic_fallback"}), 200

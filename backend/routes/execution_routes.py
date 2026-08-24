@@ -8,6 +8,7 @@ from core.playwright_runner import (
     run_playwright_test,
     EXECUTION_LOGS_CACHE,
     EXECUTION_STATUS_CACHE,
+    TELEMETRY_CACHE,
     load_json_file,
     EXECUTION_LOGS_DB_FILE,
     EXECUTIONS_DB_FILE,
@@ -15,6 +16,30 @@ from core.playwright_runner import (
 )
 from utils.logger import logger
 from utils.local_store import list_records, upsert, get
+
+def _normalized_asset_name(value):
+    from pathlib import Path
+    return Path(str(value or '').strip().strip('"\'')).stem.casefold()
+
+def resolve_upload_assets(project_id, steps):
+    assets = list_records("asset", project_id=str(project_id))
+    for step in steps:
+        if str(step.get("action", "")).lower() != "upload_file":
+            continue
+        raw_requested = str(step.get("value") or '').strip().strip('"\'').casefold()
+        exact_matches = [asset for asset in assets if str(asset.get("filename") or '').casefold() == raw_requested]
+        requested = _normalized_asset_name(step.get("value"))
+        matches = exact_matches or [asset for asset in assets if _normalized_asset_name(asset.get("filename")) == requested]
+        if not matches:
+            raise ValueError(f"Project asset not found: {step.get('value')}. Upload it under Project Assets first.")
+        if len(matches) > 1:
+            raise ValueError(f"Multiple project assets match '{step.get('value')}'. Use the complete filename including extension.")
+        step["value"] = matches[0].get("stored_path", "")
+        step["asset_name"] = matches[0].get("filename", "")
+        if str(step.get("target", "")).strip().lower() in {"", "file", "dataset", "upload"}:
+            step["target"] = "input[type='file']"
+        step["critical"] = True
+    return steps
 
 execution_bp = Blueprint("execution_bp", __name__)
 
@@ -42,11 +67,17 @@ def trigger_execution():
     invalid_actions = [step.get("action") for step in steps if not isinstance(step, dict) or str(step.get("action", "")).lower() not in allowed_actions]
     if invalid_actions:
         return jsonify({"error": f"Unsupported test actions: {invalid_actions}"}), 400
+    try:
+        steps = resolve_upload_assets(project_id, [dict(step) for step in steps])
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
     for step in steps:
         if str(step.get("action", "")).lower() == "goto":
             parsed_target = urlparse(str(step.get("target", "")))
             if parsed_target.scheme not in {"http", "https"} or not parsed_target.netloc:
                 return jsonify({"error": "Every goto target must be a valid HTTP or HTTPS URL"}), 400
+    if steps and str(steps[0].get("action", "")).lower() == "goto" and str(steps[0].get("target", "")).rstrip('/') == app_url.rstrip('/'):
+        steps = steps[1:] or [{"action": "wait", "target": "", "value": "250", "raw_command": "Wait for initial page readiness"}]
     if not PLAYWRIGHT_AVAILABLE:
         return jsonify({"error": "The local Playwright runtime is not installed correctly"}), 503
 
@@ -93,7 +124,8 @@ def get_execution_logs(execution_id):
             "status": status_info.get("status", "Running"),
             "error_message": status_info.get("error_message"),
             "duration_ms": status_info.get("duration_ms", 0),
-            "logs": logs
+            "logs": logs,
+            "telemetry": TELEMETRY_CACHE.get(execution_id, [])
         }), 200
 
     # Fallback to disk storage
@@ -101,12 +133,14 @@ def get_execution_logs(execution_id):
     logs = log_record.get("logs", [])
     exec_meta = get("execution", execution_id) or {}
 
+    telemetry_record = get("telemetry", execution_id) or {}
     return jsonify({
         "execution_id": execution_id,
         "status": exec_meta.get("status", "Passed" if logs else "Unknown"),
         "error_message": exec_meta.get("error_message"),
         "duration_ms": exec_meta.get("duration_ms", 0),
-        "logs": logs
+        "logs": logs,
+        "telemetry": telemetry_record.get("spans", [])
     }), 200
 
 @execution_bp.route("/api/executions", methods=["GET"])

@@ -42,6 +42,9 @@ jobs:
           if ($assets.Count -ne 2) {
             throw "Expected exactly two release assets, found $($assets.Count)."
           }
-          gh release create "${{ github.ref_name }}" $assets `
+          $installer = Get-ChildItem -LiteralPath frontend/release -File -Filter '*.exe' | Select-Object -First 1
+          $latestInstaller = Join-Path $installer.DirectoryName 'QA-AI-Platform-latest-x64.exe'
+          Copy-Item -LiteralPath $installer.FullName -Destination $latestInstaller
+          gh release create "${{ github.ref_name }}" ($assets + $latestInstaller) `
             --title "QA-AI Platform ${{ github.ref_name }}" `
             --generate-notes

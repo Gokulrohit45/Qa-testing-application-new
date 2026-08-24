@@ -33,21 +33,22 @@ export default function Sidebar({ projects, selectedProject, setSelectedProject,
         </div>
         <div>
           <span className="font-bold text-primary text-sm tracking-tight">QA·AI Platform</span>
-          <p className="section-label leading-none mt-0.5">v1.0.2</p>
+          <p className="section-label leading-none mt-0.5">v1.0.3</p>
         </div>
       </div>
 
       {/* Project Switcher */}
       <div className="px-3 py-4">
-        <p className="section-label px-2 mb-2">Workspace</p>
+        <p className="section-label px-2 mb-2">Current Project</p>
         <div className="relative">
           <select
             value={selectedProject?.id || ''}
             onChange={e => {
-              const targetId = parseInt(e.target.value);
-              const proj = projects.find(p => p.id === targetId);
+              const targetId = String(e.target.value);
+              const proj = projects.find(p => String(p.id) === targetId);
               if (proj) {
                 setSelectedProject(proj);
+                localStorage.setItem('qa_last_project_id', String(proj.id));
                 navigate(`/projects/${proj.id}`);
               }
             }}
@@ -65,13 +66,13 @@ export default function Sidebar({ projects, selectedProject, setSelectedProject,
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto px-3 py-2 space-y-4 scrollbar-thin">
         <NavSection label="General">
-          <SidebarItem to="/dashboard"       icon={<LayoutDashboard size={15} />} label="Dashboard" />
+          <SidebarItem to="/dashboard"       icon={<LayoutDashboard size={15} />} label="All Projects" />
           <SidebarItem to="/projects/create" icon={<PlusCircle size={15} />}      label="New Project" />
         </NavSection>
 
         {selectedProject && (
           <NavSection label="Active Workspace">
-            <SidebarItem to={`/projects/${selectedProject.id}`} icon={<Briefcase size={15} />} label="Project Hub" />
+            <SidebarItem to={`/projects/${selectedProject.id}`} icon={<Briefcase size={15} />} label="Project Overview" />
           </NavSection>
         )}
 

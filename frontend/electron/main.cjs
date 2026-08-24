@@ -145,6 +145,19 @@ function createWindow(port, token, publicConfig) {
   else mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
 }
 
+function stopBackendTree() {
+  if (!backendProcess || backendProcess.killed) return;
+  const pid = backendProcess.pid;
+  backendProcess.kill();
+  if (process.platform === 'win32' && pid) {
+    const killer = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
+      windowsHide: true, stdio: 'ignore'
+    });
+    killer.unref();
+  }
+  backendProcess = undefined;
+}
+
 app.whenReady().then(async () => {
   try {
     const port = await reservePort();
@@ -162,5 +175,5 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => app.quit());
 app.on('before-quit', () => {
   shuttingDown = true;
-  if (backendProcess && !backendProcess.killed) backendProcess.kill();
+  stopBackendTree();
 });

@@ -21,6 +21,7 @@ except ImportError:
 # In-memory logs store
 EXECUTION_LOGS_CACHE = {}
 EXECUTION_STATUS_CACHE = {}
+TELEMETRY_CACHE = {}
 CANCELLED_EXECUTIONS = set()
 STORAGE_LOCK = threading.RLock()
 
@@ -58,6 +59,19 @@ def update_disk_execution_logs(execution_id, logs, status="Finished", error_mess
     execution.update({"status": status, "error_message": error_message, "duration_ms": duration_ms})
     store_upsert("execution", execution)
 
+def _new_span(execution_id, trace_id, name, started, status="OK", attributes=None, parent_span_id=None):
+    return {
+        "id": str(uuid.uuid4()), "execution_id": execution_id, "trace_id": trace_id,
+        "span_id": uuid.uuid4().hex[:16], "parent_span_id": parent_span_id,
+        "service_name": "local-playwright-runner", "name": name,
+        "status_code": status, "duration_ms": max(0, int((time.time() - started) * 1000)),
+        "attributes": attributes or {}, "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")
+    }
+
+def _record_telemetry(execution_id, spans):
+    TELEMETRY_CACHE[execution_id] = list(spans)
+    store_upsert("telemetry", {"id": execution_id, "spans": spans})
+
 def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_enabled: bool = False, y4m_path: str = None, headless: bool = True, timeout_seconds: int = 30):
     """
     Synchronously runs Playwright actions in background thread, emitting step logs and screenshots.
@@ -76,6 +90,9 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
 
     start_time = time.time()
     logs = []
+    trace_id = uuid.uuid4().hex
+    spans = []
+    root_span_id = uuid.uuid4().hex[:16]
     has_error = False
     global_err_msg = None
 
@@ -95,6 +112,32 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
             )
             
             page = context.new_page()
+            request_started = {}
+            def request_key(request):
+                return f"{request.method} {request.url}"
+            def on_request(request):
+                request_started.setdefault(request_key(request), []).append(time.time())
+            def request_start(request):
+                queue = request_started.get(request_key(request), [])
+                started = queue.pop(0) if queue else time.time()
+                if not queue:
+                    request_started.pop(request_key(request), None)
+                return started
+            def on_response(response):
+                observed = request_start(response.request)
+                spans.append(_new_span(execution_id, trace_id, f"HTTP {response.request.method} {response.url.split('?')[0]}", observed,
+                    "ERROR" if response.status >= 400 else "OK", {"type": "http", "method": response.request.method,
+                    "url": response.url.split('?')[0], "http_status": response.status}, root_span_id))
+                _record_telemetry(execution_id, spans)
+            def on_request_failed(request):
+                observed = request_start(request)
+                spans.append(_new_span(execution_id, trace_id, f"HTTP FAILED {request.method} {request.url.split('?')[0]}", observed,
+                    "ERROR", {"type": "http", "method": request.method, "url": request.url.split('?')[0],
+                    "failure": str(request.failure or "Request failed")}, root_span_id))
+                _record_telemetry(execution_id, spans)
+            page.on("request", on_request)
+            page.on("response", on_response)
+            page.on("requestfailed", on_request_failed)
             action_timeout = max(3, min(int(timeout_seconds), 300)) * 1000
             page.set_default_timeout(action_timeout)
 
@@ -124,6 +167,8 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                         "duration_ms": step_dur
                     }
                     logs.append(log_item)
+                    spans.append(_new_span(execution_id, trace_id, "playwright.goto", step_start, "OK", {"type": "step", "action": "goto", "target": app_url}, root_span_id))
+                    _record_telemetry(execution_id, spans)
                     EXECUTION_LOGS_CACHE[execution_id] = list(logs)
                     update_disk_execution_logs(execution_id, logs, status="Running")
                 except Exception as e:
@@ -142,13 +187,16 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                         "duration_ms": step_dur
                     }
                     logs.append(log_item)
+                    spans.append(_new_span(execution_id, trace_id, "playwright.goto", step_start, "ERROR", {"type": "step", "action": "goto", "target": app_url, "error": str(e)}, root_span_id))
+                    _record_telemetry(execution_id, spans)
                     EXECUTION_LOGS_CACHE[execution_id] = list(logs)
                     has_error = True
                     global_err_msg = f"Failed to navigate to {app_url}: {str(e)}"
 
             # Execute translated JSON steps
             if not has_error:
-                for idx, step in enumerate(steps, start=len(logs) + 1):
+                for step_offset, step in enumerate(steps):
+                    idx = len(logs) + 1
                     if execution_id in CANCELLED_EXECUTIONS:
                         has_error = True
                         global_err_msg = "Execution stopped by user"
@@ -174,6 +222,10 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                             res = smart_click(page, target, timeout=action_timeout)
                             if not res:
                                 raise RuntimeError(f"Could not click target '{target}'")
+                            try:
+                                page.wait_for_load_state("domcontentloaded", timeout=1500)
+                            except Exception:
+                                pass
                         elif action == "fill":
                             res = smart_fill(page, target, value, timeout=action_timeout)
                             if not res:
@@ -208,7 +260,14 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                         elif action == "upload_file":
                             if not Path(value).is_file():
                                 raise RuntimeError(f"Upload file does not exist: {value}")
-                            page.set_input_files(target, value)
+                            upload_target = target or "input[type='file']"
+                            try:
+                                page.locator(upload_target).first.set_input_files(value, timeout=action_timeout)
+                            except Exception:
+                                inputs = page.locator("input[type='file']")
+                                if inputs.count() == 0:
+                                    raise RuntimeError("No file input was found behind the upload control")
+                                inputs.first.set_input_files(value, timeout=action_timeout)
                         else:
                             raise RuntimeError(f"Unsupported test action: {action}")
 
@@ -218,7 +277,8 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                         step_status = "failed"
                         step_err = str(e)
                         has_error = True
-                        global_err_msg = step_err
+                        if not global_err_msg:
+                            global_err_msg = step_err
                         try:
                             page.screenshot(path=str(screenshot_path))
                         except Exception:
@@ -231,7 +291,7 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                         "step_number": idx,
                         "action": action,
                         "target": target,
-                        "value": "[REDACTED]" if action == "fill" and _is_sensitive_target(target) else str(value),
+                        "value": (step.get("asset_name") or Path(value).name) if action == "upload_file" else ("[REDACTED]" if action == "fill" and _is_sensitive_target(target) else str(value)),
                         "raw_command": f"fill {target} [REDACTED]" if action == "fill" and _is_sensitive_target(target) else raw_cmd,
                         "status": step_status,
                         "error_message": step_err,
@@ -240,8 +300,24 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                         "duration_ms": step_dur
                     }
                     logs.append(log_item)
+                    spans.append(_new_span(execution_id, trace_id, f"playwright.{action}", step_start,
+                        "ERROR" if step_status == "failed" else "OK",
+                        {"type": "step", "step_number": idx, "action": action, "target": target,
+                         "asset_name": step.get("asset_name"), "error": step_err}, root_span_id))
+                    _record_telemetry(execution_id, spans)
                     EXECUTION_LOGS_CACHE[execution_id] = list(logs)
                     update_disk_execution_logs(execution_id, logs, status="Running")
+                    is_critical = bool(step.get("critical")) or action in {"goto", "upload_file"}
+                    if step_status == "failed" and is_critical:
+                        for skipped in steps[step_offset + 1:]:
+                            logs.append({"id": str(uuid.uuid4()), "execution_id": execution_id,
+                                "step_number": len(logs) + 1, "action": str(skipped.get("action", "wait")).lower(),
+                                "target": skipped.get("target", ""), "value": "", "raw_command": skipped.get("raw_command", ""),
+                                "status": "skipped", "error_message": f"Skipped because critical step #{idx} failed: {step_err}",
+                                "screenshot_url": None, "duration_ms": 0})
+                        EXECUTION_LOGS_CACHE[execution_id] = list(logs)
+                        update_disk_execution_logs(execution_id, logs, status="Running", error_message=global_err_msg)
+                        break
 
             browser.close()
 
@@ -260,8 +336,13 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
     EXECUTION_STATUS_CACHE[execution_id] = {
         "status": final_status,
         "error_message": global_err_msg,
-        "duration_ms": total_duration
+        "duration_ms": total_duration, "trace_id": trace_id
     }
+    spans.append({"id": str(uuid.uuid4()), "execution_id": execution_id, "trace_id": trace_id,
+        "span_id": root_span_id, "parent_span_id": None, "service_name": "local-playwright-runner",
+        "name": "test.execution", "status_code": "ERROR" if has_error else "OK", "duration_ms": total_duration,
+        "attributes": {"type": "execution", "status": final_status}, "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")})
+    _record_telemetry(execution_id, spans)
     update_disk_execution_logs(execution_id, logs, status=final_status, error_message=global_err_msg, duration_ms=total_duration)
     CANCELLED_EXECUTIONS.discard(execution_id)
     logger.info(f"Execution {execution_id} finished with status: {final_status} in {total_duration}ms")

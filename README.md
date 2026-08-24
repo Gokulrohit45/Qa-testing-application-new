@@ -35,6 +35,13 @@ Apply [schema.sql](schema.sql) to Supabase before deploying the updated client.
 Existing rows with a missing `user_id` must be assigned to their correct owner
 or removed before enforcing non-null ownership.
 
+For an existing v1.0.x database, apply
+[`migrations/20260824_project_assets.sql`](migrations/20260824_project_assets.sql)
+once before installing v1.0.3. It creates the private project-assets bucket and
+metadata table used to restore uploaded test files on another signed-in device.
+Face videos remain in the private `face-videos` bucket and are restored and
+converted by each desktop engine when required.
+
 ## Windows release
 
 Use GitHub Actions `Windows release`, or run from PowerShell on a Windows build
@@ -44,8 +51,11 @@ machine with Python 3.11+ and Node.js 20+:
 ./scripts/build-windows.ps1
 ```
 
-Artifacts are written to `frontend/release`. Both an NSIS installer and a ZIP
-build are produced. The script bundles the Python backend, Playwright Chromium,
+Artifacts are written to `frontend/release`. Both an NSIS installer (`.exe`)
+and a portable ZIP are produced. Normal users should download and run the EXE;
+the ZIP is an advanced portable alternative. The tagged release also publishes
+`QA-AI-Platform-latest-x64.exe`, which gives the landing page a stable link to
+the newest installer. The build bundles the Python backend, Playwright Chromium,
 and FFmpeg support; end-user laptops do not need those prerequisites.
 
 ## Verification

@@ -115,6 +115,19 @@ export const AuthenticationService = {
       }
     } catch (e) {}
     return null;
+  },
+
+  async updateProfile(fullName) {
+    const cleanName = String(fullName || '').trim();
+    if (cleanName.length < 2 || cleanName.length > 100) throw new Error('Name must contain between 2 and 100 characters');
+    const { data, error } = await supabase.auth.updateUser({ data: { full_name: cleanName } });
+    if (error) throw new Error(error.message || 'Profile update failed');
+    const profile = {
+      id: data.user.id, email: data.user.email, full_name: cleanName,
+      user_metadata: { ...(data.user.user_metadata || {}), full_name: cleanName }
+    };
+    localStorage.setItem('user', JSON.stringify(profile));
+    return profile;
   }
 };
 
@@ -232,6 +245,9 @@ export const ProjectService = {
       if (objects?.length) {
         await supabase.storage.from('face-videos').remove(objects.map(item => `${folder}/${item.name}`));
       }
+      const { data: assetRows } = await supabase.from('project_assets').select('storage_path').eq('project_id', projectId).eq('user_id', session.user.id);
+      const assetPaths = (assetRows || []).map(row => row.storage_path).filter(Boolean);
+      if (assetPaths.length) await supabase.storage.from('project-assets').remove(assetPaths);
     }
     const { error } = await supabase.from('projects').delete().eq('id', projectId);
     if (error) throw new Error(`Cloud deletion failed: ${error.message}`);
@@ -397,13 +413,14 @@ export const ExecutionService = {
     if (executionError) throw executionError;
     const { data: logs, error: logsError } = await supabase.from('execution_logs').select('*').eq('execution_id', executionId).order('step_number');
     if (logsError) throw logsError;
+    const { data: telemetry } = await supabase.from('telemetry_spans').select('*').eq('execution_id', executionId).order('created_at');
     const resolvedLogs = await Promise.all((logs || []).map(async log => {
       if (!log.screenshot_url?.startsWith('storage://')) return log;
       const path = log.screenshot_url.slice('storage://'.length);
       const { data } = await supabase.storage.from('execution-artifacts').createSignedUrl(path, 3600);
       return { ...log, screenshot_url: data?.signedUrl || null };
     }));
-    return { execution_id: executionId, ...execution, logs: resolvedLogs };
+    return { execution_id: executionId, ...execution, logs: resolvedLogs, telemetry: telemetry || [] };
   },
   async getExecutionHistory(projectId) {
     const result = new Map();
@@ -452,6 +469,14 @@ export const ExecutionService = {
       const { error: logsError } = await supabase.from('execution_logs').upsert(logs);
       if (logsError) throw logsError;
     }
+    const telemetry = (result.telemetry || []).map(span => pickFields(span, [
+      'id', 'execution_id', 'trace_id', 'span_id', 'parent_span_id', 'service_name',
+      'name', 'status_code', 'duration_ms', 'attributes', 'created_at'
+    ]));
+    if (telemetry.length) {
+      const { error: telemetryError } = await supabase.from('telemetry_spans').upsert(telemetry);
+      if (telemetryError) throw telemetryError;
+    }
   },
   async stopExecution(executionId) {
     return await fetchLocal(`/executions/${executionId}/stop`, { method: 'POST' });
@@ -496,23 +521,71 @@ export const AssetService = {
     return await this.uploadVideo(file, projectId);
   },
 
-  async uploadAsset(file, projectId) {
+  async uploadAssetLocal(file, projectId, assetId = '') {
     const formData = new FormData();
     formData.append('asset', file);
     if (projectId) formData.append('project_id', projectId);
+    if (assetId) formData.append('asset_id', assetId);
     const res = await fetch(`${LOCAL_FLASK_URL}/upload-asset`, { method: 'POST', headers: LOCAL_API_TOKEN ? { 'X-QA-AI-Token': LOCAL_API_TOKEN } : {}, body: formData });
-    if (!res.ok) throw new Error('Asset upload failed');
+    if (!res.ok) throw new Error(`Local asset save failed: ${await res.text()}`);
     return await res.json();
   },
 
+  async uploadAsset(file, projectId) {
+    const session = await AuthenticationService.getCurrentSession();
+    if (!session?.user?.id) throw new Error('You must be signed in to upload an asset');
+    const assetId = crypto.randomUUID();
+    const local = await this.uploadAssetLocal(file, projectId, assetId);
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const storagePath = `${session.user.id}/${projectId}/${assetId}/${safeName}`;
+    const { error: uploadError } = await supabase.storage.from('project-assets').upload(storagePath, file, {
+      upsert: true, contentType: file.type || 'application/octet-stream'
+    });
+    if (uploadError) throw new Error(`Cloud asset upload failed: ${uploadError.message}`);
+    const metadata = {
+      id: assetId, project_id: projectId, user_id: session.user.id, filename: file.name,
+      storage_path: storagePath, size_bytes: file.size || 0,
+      content_type: file.type || 'application/octet-stream', created_at: local.created_at || new Date().toISOString()
+    };
+    const { error: metadataError } = await supabase.from('project_assets').upsert([metadata]);
+    if (metadataError) throw new Error(`Cloud asset metadata save failed: ${metadataError.message}`);
+    return { ...local, ...metadata };
+  },
+
   async getAssets(projectId) {
+    const merged = new Map();
     try {
-      return await fetchLocal(`/assets?project_id=${projectId}`);
-    } catch (e) { return []; }
+      const local = await fetchLocal(`/assets?project_id=${projectId}`);
+      (local || []).forEach(asset => merged.set(asset.id, asset));
+    } catch (e) {}
+    const session = await AuthenticationService.getCurrentSession();
+    if (!session?.user?.id) return Array.from(merged.values());
+    const { data, error } = await supabase.from('project_assets').select('*').eq('project_id', projectId).eq('user_id', session.user.id);
+    if (!error) (data || []).forEach(asset => merged.set(asset.id, { ...asset, ...merged.get(asset.id) }));
+    return Array.from(merged.values());
+  },
+
+  async prepareAssetsForExecution(projectId) {
+    const assets = await this.getAssets(projectId);
+    for (const asset of assets) {
+      if (asset.stored_path && asset.available_locally !== false) continue;
+      if (!asset.storage_path) continue;
+      const { data, error } = await supabase.storage.from('project-assets').download(asset.storage_path);
+      if (error) throw new Error(`Could not restore project asset '${asset.filename}': ${error.message}`);
+      const file = new File([data], asset.filename, { type: asset.content_type || 'application/octet-stream' });
+      await this.uploadAssetLocal(file, projectId, asset.id);
+    }
+    return await this.getAssets(projectId);
   },
 
   async deleteAsset(assetId) {
-    await fetchLocal(`/assets/${assetId}`, { method: 'DELETE' });
+    const session = await AuthenticationService.getCurrentSession();
+    if (session?.user?.id) {
+      const { data } = await supabase.from('project_assets').select('storage_path').eq('id', assetId).eq('user_id', session.user.id).maybeSingle();
+      if (data?.storage_path) await supabase.storage.from('project-assets').remove([data.storage_path]);
+      await supabase.from('project_assets').delete().eq('id', assetId).eq('user_id', session.user.id);
+    }
+    try { await fetchLocal(`/assets/${assetId}`, { method: 'DELETE' }); } catch (e) {}
   }
 };
 

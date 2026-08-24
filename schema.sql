@@ -78,6 +78,18 @@ CREATE TABLE IF NOT EXISTS public.telemetry_spans (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
+-- 6. PRIVATE PROJECT ASSET METADATA
+CREATE TABLE IF NOT EXISTS public.project_assets (
+    id UUID PRIMARY KEY,
+    project_id UUID REFERENCES public.projects(id) ON DELETE CASCADE NOT NULL,
+    user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
+    filename TEXT NOT NULL,
+    storage_path TEXT NOT NULL,
+    size_bytes BIGINT DEFAULT 0 NOT NULL,
+    content_type TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS public.password_reset_otps (
     email TEXT PRIMARY KEY,
     otp_hash TEXT NOT NULL,
@@ -95,6 +107,7 @@ CREATE INDEX IF NOT EXISTS idx_testcases_project ON public.test_cases(project_id
 CREATE INDEX IF NOT EXISTS idx_executions_project ON public.executions(project_id);
 CREATE INDEX IF NOT EXISTS idx_execution_logs_exec ON public.execution_logs(execution_id);
 CREATE INDEX IF NOT EXISTS idx_telemetry_spans_exec ON public.telemetry_spans(execution_id);
+CREATE INDEX IF NOT EXISTS idx_project_assets_project ON public.project_assets(project_id);
 
 -- ROW LEVEL SECURITY (RLS) POLICIES
 ALTER TABLE public.projects ENABLE ROW LEVEL SECURITY;
@@ -102,6 +115,7 @@ ALTER TABLE public.test_cases ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.executions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.execution_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.telemetry_spans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.project_assets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.password_reset_otps ENABLE ROW LEVEL SECURITY;
 
 INSERT INTO storage.buckets (id, name, public)
@@ -110,6 +124,10 @@ ON CONFLICT (id) DO UPDATE SET public = false;
 
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('face-videos', 'face-videos', false)
+ON CONFLICT (id) DO UPDATE SET public = false;
+
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('project-assets', 'project-assets', false)
 ON CONFLICT (id) DO UPDATE SET public = false;
 
 DROP POLICY IF EXISTS "Users read execution artifacts" ON storage.objects;
@@ -140,6 +158,20 @@ WITH CHECK (bucket_id = 'face-videos' AND (storage.foldername(name))[1] = auth.u
 CREATE POLICY "Users delete their face videos" ON storage.objects FOR DELETE TO authenticated
 USING (bucket_id = 'face-videos' AND (storage.foldername(name))[1] = auth.uid()::text);
 
+DROP POLICY IF EXISTS "Users read their project assets" ON storage.objects;
+DROP POLICY IF EXISTS "Users create their project assets" ON storage.objects;
+DROP POLICY IF EXISTS "Users update their project assets" ON storage.objects;
+DROP POLICY IF EXISTS "Users delete their project assets" ON storage.objects;
+CREATE POLICY "Users read their project assets" ON storage.objects FOR SELECT TO authenticated
+USING (bucket_id = 'project-assets' AND (storage.foldername(name))[1] = auth.uid()::text);
+CREATE POLICY "Users create their project assets" ON storage.objects FOR INSERT TO authenticated
+WITH CHECK (bucket_id = 'project-assets' AND (storage.foldername(name))[1] = auth.uid()::text);
+CREATE POLICY "Users update their project assets" ON storage.objects FOR UPDATE TO authenticated
+USING (bucket_id = 'project-assets' AND (storage.foldername(name))[1] = auth.uid()::text)
+WITH CHECK (bucket_id = 'project-assets' AND (storage.foldername(name))[1] = auth.uid()::text);
+CREATE POLICY "Users delete their project assets" ON storage.objects FOR DELETE TO authenticated
+USING (bucket_id = 'project-assets' AND (storage.foldername(name))[1] = auth.uid()::text);
+
 DROP POLICY IF EXISTS "Allow all actions for authenticated users" ON public.projects;
 DROP POLICY IF EXISTS "Allow all actions for test_cases" ON public.test_cases;
 DROP POLICY IF EXISTS "Allow all actions for executions" ON public.executions;
@@ -150,6 +182,7 @@ DROP POLICY IF EXISTS "Users manage their test cases" ON public.test_cases;
 DROP POLICY IF EXISTS "Users manage their executions" ON public.executions;
 DROP POLICY IF EXISTS "Users manage their execution logs" ON public.execution_logs;
 DROP POLICY IF EXISTS "Users manage their telemetry" ON public.telemetry_spans;
+DROP POLICY IF EXISTS "Users manage their project assets" ON public.project_assets;
 
 CREATE POLICY "Users manage their projects" ON public.projects FOR ALL TO authenticated
 USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
@@ -167,3 +200,6 @@ WITH CHECK (EXISTS (SELECT 1 FROM public.executions e WHERE e.id = execution_id 
 CREATE POLICY "Users manage their telemetry" ON public.telemetry_spans FOR ALL TO authenticated
 USING (EXISTS (SELECT 1 FROM public.executions e WHERE e.id = execution_id AND e.user_id = auth.uid()))
 WITH CHECK (EXISTS (SELECT 1 FROM public.executions e WHERE e.id = execution_id AND e.user_id = auth.uid()));
+CREATE POLICY "Users manage their project assets" ON public.project_assets FOR ALL TO authenticated
+USING (auth.uid() = user_id AND EXISTS (SELECT 1 FROM public.projects p WHERE p.id = project_id AND p.user_id = auth.uid()))
+WITH CHECK (auth.uid() = user_id AND EXISTS (SELECT 1 FROM public.projects p WHERE p.id = project_id AND p.user_id = auth.uid()));

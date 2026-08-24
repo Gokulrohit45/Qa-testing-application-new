@@ -25,11 +25,14 @@ export default function Profile() {
     e.preventDefault();
     setSaving(true);
     try {
+      const updated = await AuthenticationService.updateProfile(profile.name);
+      setProfile(current => ({ ...current, name: updated.full_name, email: updated.email || current.email }));
       setSaved(true);
       window.dispatchEvent(new Event('profile_updated'));
       setTimeout(() => setSaved(false), 3000);
     } catch (err) {
       console.error('Error saving profile:', err);
+      alert(`Profile update failed: ${err.message}`);
     } finally {
       setSaving(false);
     }
@@ -111,9 +114,9 @@ export default function Profile() {
               </div>
 
               <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
-                <h4 className="text-xs font-bold text-slate-300">Identity Synchronization Notice</h4>
+                <h4 className="text-xs font-bold text-slate-300">Profile Synchronization</h4>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  Saving your name updates your identity live across all active workspaces, execution logs, reports, sidebar user card, and top navigation header avatar.
+                  Saving your name updates your account identity and refreshes the profile, sidebar user card, and header avatar on signed-in devices.
                 </p>
               </div>
             </div>
@@ -121,7 +124,7 @@ export default function Profile() {
             <div className="px-6 py-4 bg-slate-50 dark:bg-zinc-900/50 border-t border-slate-100/50 dark:border-zinc-800/30 flex items-center justify-between">
               {saved && (
                 <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 text-xs font-semibold animate-pulse">
-                  <CheckCircle2 size={15}/> Profile updated successfully live across platform!
+                  <CheckCircle2 size={15}/> Profile updated successfully.
                 </div>
               )}
               <button type="submit" disabled={saving} className="btn-primary ml-auto flex items-center gap-2 disabled:opacity-50">

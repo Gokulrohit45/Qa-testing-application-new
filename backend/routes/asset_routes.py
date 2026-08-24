@@ -78,7 +78,11 @@ def upload_asset():
     project_assets_dir = ASSETS_DIR / safe_project_id
     project_assets_dir.mkdir(parents=True, exist_ok=True)
 
-    asset_id = str(uuid.uuid4())
+    requested_asset_id = request.form.get("asset_id", "")
+    try:
+        asset_id = str(uuid.UUID(requested_asset_id)) if requested_asset_id else str(uuid.uuid4())
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid asset ID"}), 400
     original_name = secure_filename(file.filename)
     if not original_name:
         return jsonify({"error": "Invalid filename"}), 400
@@ -113,7 +117,10 @@ def upload_asset():
 def list_assets(project_id=None):
     if not project_id:
         project_id = request.args.get("project_id", "")
-    return jsonify(list_records("asset", project_id=str(project_id) if project_id else None)), 200
+    assets = list_records("asset", project_id=str(project_id) if project_id else None)
+    for asset in assets:
+        asset["available_locally"] = Path(asset.get("stored_path", "")).is_file()
+    return jsonify(assets), 200
 
 # ── Delete Asset ───────────────────────────────────────────────────────────────
 @asset_bp.route("/api/assets/<asset_id>", methods=["DELETE"])

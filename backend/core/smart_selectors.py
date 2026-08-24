@@ -99,6 +99,8 @@ def smart_click(page, target: str, timeout: int = 6000) -> bool:
     """
     t_lower = target.lower().strip()
 
+    # Target-specific selectors come first. Never use an unrelated generic
+    # submit button for an arbitrary click command.
     selectors = [
         f"button:has-text('{target}')",
         f"button:has-text('{t_lower}')",
@@ -107,8 +109,6 @@ def smart_click(page, target: str, timeout: int = 6000) -> bool:
         f"[role='button']:has-text('{target}')",
         f"a:has-text('{target}')",
         f"input[type='button'][value*='{target}' i]",
-        f"button[type='submit']",
-        f"input[type='submit']",
         f"#{target}",
         f".{target}",
         f"text='{target}'",
@@ -135,6 +135,29 @@ def smart_click(page, target: str, timeout: int = 6000) -> bool:
                 return True
         except Exception as e:
             continue
+
+    # Accessible-name and text fallbacks also handle clickable parent cards.
+    for locator in [
+        page.get_by_role("button", name=target, exact=False),
+        page.get_by_role("link", name=target, exact=False),
+        page.get_by_text(target, exact=False)
+    ]:
+        try:
+            elem = locator.first
+            elem.wait_for(state="visible", timeout=min(timeout, 2000))
+            elem.scroll_into_view_if_needed()
+            elem.click()
+            logger.info(f"smart_click succeeded with accessible target '{target}'")
+            return True
+        except Exception:
+            try:
+                parent = locator.first.locator("xpath=ancestor-or-self::*[@role='button' or self::button or self::a or @onclick][1]")
+                parent.wait_for(state="visible", timeout=500)
+                parent.click()
+                logger.info(f"smart_click succeeded with clickable parent for '{target}'")
+                return True
+            except Exception:
+                continue
 
     try:
         page.click(target, timeout=min(timeout, 2000))

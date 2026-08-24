@@ -23,12 +23,37 @@ const TABS = [
   { id: 'report',    label: 'Report'          },
 ];
 
-export default function ProjectDetails({ projects = [], onDeleteProject }) {
+const isFailedLog = log => ['failed', 'Failed'].includes(log?.status);
+const isSkippedLog = log => ['skipped', 'Skipped'].includes(log?.status);
+
+function classifyFailure(log) {
+  if (!log) return { category: 'none', recommendation: 'No failed UI step was recorded.' };
+  const text = `${log.action || ''} ${log.target || ''} ${log.error_message || ''}`.toLowerCase();
+  if (log.action === 'upload_file' || /asset|upload|file.*not found|ambiguous/.test(text)) {
+    return { category: 'File upload', recommendation: 'Confirm the named project asset exists, then inspect the target page file input and the failure screenshot.' };
+  }
+  if (log.action === 'verify' || /not found on page|assert|expected/.test(text)) {
+    return { category: 'Verification', recommendation: 'Confirm the expected text and wait for the page state that should display it.' };
+  }
+  if (log.action === 'goto' || /navigation|dns|net::|connection|timeout/.test(text)) {
+    return { category: 'Navigation or network', recommendation: 'Check the target URL, connectivity, page load timing, and the captured HTTP failures below.' };
+  }
+  if (log.action === 'click' || log.action === 'fill' || /selector|locate|element/.test(text)) {
+    return { category: 'Element resolution', recommendation: 'Inspect the failure screenshot and use the element visible label, role, placeholder, or a stable test ID.' };
+  }
+  return { category: 'Runtime', recommendation: 'Review the exact error and screenshot; reproduce the step once in headed mode to inspect the page state.' };
+}
+
+export default function ProjectDetails({ projects = [], onDeleteProject, onSelectProject }) {
   const { id } = useParams();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('overview');
 
   const project = projects.find(p => String(p.id) === String(id)) || null;
+
+  useEffect(() => {
+    if (project && onSelectProject) onSelectProject(project);
+  }, [project?.id]);
 
   // Execution State
   const [executing, setExecuting] = useState(false);
@@ -44,12 +69,15 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
   const [translating, setTranslating] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const [totalEstimatedTime, setTotalEstimatedTime] = useState(0);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [estimateLearning, setEstimateLearning] = useState(false);
   const [translationTime, setTranslationTime] = useState(0);
   const [translationStatusMsg, setTranslationStatusMsg] = useState('');
   const [resultsLogs, setResultsLogs] = useState([]);
   const [resultsStatus, setResultsStatus] = useState('');
   const [resultsId, setResultsId] = useState('');
   const [resultsDuration, setResultsDuration] = useState(0);
+  const [resultsTelemetry, setResultsTelemetry] = useState([]);
   const [resultsBrowser, setResultsBrowser] = useState('Chromium');
   const [resultsDate, setResultsDate] = useState('');
   const [showReportView, setShowReportView] = useState(false); // keep placeholder to prevent syntax errors
@@ -74,6 +102,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
   const [faceVideoStoragePath, setFaceVideoStoragePath] = useState(project?.face_video_storage_path || '');
   const [videoUploading, setVideoUploading] = useState(false);
   const [videoRestoring, setVideoRestoring] = useState(false);
+  const [videoRestoreError, setVideoRestoreError] = useState('');
 
   // Assets State
   const [assets, setAssets] = useState([]);
@@ -106,6 +135,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
               setResultsStatus(res.status);
               setResultsId(latest.id);
               setResultsDuration(res.duration_ms || 0);
+              setResultsTelemetry(res.telemetry || []);
               setResultsDate(latest.created_at || '');
             }
           });
@@ -141,6 +171,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
     }
 
     setVideoRestoring(true);
+    setVideoRestoreError('');
     AssetService.restoreFaceVideo(faceVideoStoragePath, id)
       .then(async res => {
         if (cancelled || !res?.y4m_path) return;
@@ -151,7 +182,10 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
         });
       })
       .catch(error => {
-        if (!cancelled) console.warn('Face video could not be restored from cloud:', error.message);
+        if (!cancelled) {
+          console.warn('Face video could not be restored from cloud:', error.message);
+          setVideoRestoreError(error.message);
+        }
       })
       .finally(() => { if (!cancelled) setVideoRestoring(false); });
 
@@ -165,26 +199,48 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
   };
 
   useEffect(() => {
-    let interval = null;
-    if (executing && countdown > 0) {
-      interval = setInterval(() => {
-        setCountdown(prev => Math.max(0, prev - 1));
-      }, 1000);
+    if (!executing) return undefined;
+    const interval = setInterval(() => {
+      const elapsed = Math.max(0, Math.floor((Date.now() - startTimeRef.current) / 1000));
+      setElapsedSeconds(elapsed);
+      setCountdown(Math.max(0, totalEstimatedTime - elapsed));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [executing, totalEstimatedTime]);
+
+  useEffect(() => {
+    if (!executing || elapsedSeconds < 3) return;
+    const completed = executionLogs.filter(log => !isSkippedLog(log)).length;
+    const targetTc = testCases.find(tc => String(tc.id) === String(selectedTestCaseId)) || testCases[0];
+    const expectedSteps = Math.max(1, (targetTc?.cached_json || []).length + 1);
+    if (completed <= 0 || completed >= expectedSteps) return;
+    const projected = Math.ceil(elapsedSeconds * expectedSteps / completed);
+    if (projected > totalEstimatedTime) {
+      setTotalEstimatedTime(previous => Math.max(previous, Math.round(previous * 0.7 + projected * 0.3)));
     }
-    return () => { if (interval) clearInterval(interval); };
-  }, [executing, countdown]);
+  }, [executing, elapsedSeconds, executionLogs.length, selectedTestCaseId]);
 
   const handleLaunchExecution = async () => {
     if (!project) return;
     const targetTc = testCases.find(tc => String(tc.id) === String(selectedTestCaseId)) || testCases[0];
     
-    // Average execution duration from history (fallback to 30s)
-    const avgDuration = execHistory.length > 0
-      ? Math.round(execHistory.reduce((sum, h) => sum + (h.duration_ms || 0), 0) / execHistory.length / 1000)
-      : 30;
+    const comparableRuns = execHistory
+      .filter(run => String(run.test_id || '') === String(targetTc?.id || '') && ['Passed', 'Failed'].includes(run.status) && Number(run.duration_ms) > 0)
+      .slice(0, 10)
+      .map(run => Math.round(Number(run.duration_ms) / 1000))
+      .sort((a, b) => a - b);
+    const historyMedian = comparableRuns.length
+      ? comparableRuns[Math.floor(comparableRuns.length / 2)]
+      : 0;
+    const explicitWaitSeconds = (targetTc?.cached_json || []).reduce((sum, step) =>
+      String(step.action).toLowerCase() === 'wait' ? sum + Math.round(Number(step.value || 0) / 1000) : sum, 0);
+    const structuralEstimate = Math.max(15, explicitWaitSeconds + Math.max(1, (targetTc?.cached_json || []).length) * 2);
+    const avgDuration = historyMedian || structuralEstimate;
 
     setTotalEstimatedTime(avgDuration);
     setCountdown(avgDuration);
+    setElapsedSeconds(0);
+    setEstimateLearning(comparableRuns.length === 0);
     setFinalDuration(0);
     startTimeRef.current = Date.now();
 
@@ -196,6 +252,27 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
     setResultsId('');
     setActiveTab('liverun');
     try {
+      await AssetService.prepareAssetsForExecution(project.id);
+      let executionVideoPath = project.video_file_path || videoPath;
+      if (project.face_auth_enabled && !executionVideoPath && faceVideoStoragePath) {
+        setVideoRestoring(true);
+        setVideoRestoreError('');
+        try {
+          const restored = await AssetService.restoreFaceVideo(faceVideoStoragePath, project.id);
+          executionVideoPath = restored?.y4m_path || '';
+          if (!executionVideoPath) throw new Error('The local engine did not return a converted face-video path');
+          setVideoPath(executionVideoPath);
+          await ProjectService.updateProject(project.id, {
+            video_file_path: executionVideoPath,
+            face_video_storage_path: faceVideoStoragePath
+          });
+        } catch (error) {
+          setVideoRestoreError(error.message);
+          throw new Error(`Face video could not be restored on this computer: ${error.message}`);
+        } finally {
+          setVideoRestoring(false);
+        }
+      }
       let stepsToRun = targetTc?.cached_json || [];
       if (stepsToRun.length === 0 && targetTc?.commands) {
         const parsed = await AIService.translatePrompt(targetTc.commands);
@@ -210,7 +287,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
           { action: 'goto', target: project.app_url, value: '', raw_command: `Navigate to ${project.app_url}` }
         ],
         face_auth_enabled: project.face_auth_enabled,
-        y4m_path: project.video_file_path || videoPath,
+        y4m_path: executionVideoPath,
         headless,
         timeout_seconds: Number(timeoutSec)
       });
@@ -444,6 +521,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
         setResultsStatus(res.status);
         setResultsId(runId);
         setResultsDuration(res.duration_ms || 0);
+        setResultsTelemetry(res.telemetry || []);
         setResultsBrowser('Chromium');
         setResultsDate(execMeta.created_at || new Date().toISOString());
         setActiveTab('results');
@@ -468,6 +546,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
             setResultsStatus(res.status);
             setResultsId(execId);
             setResultsDuration(res.duration_ms || 0);
+            setResultsTelemetry(res.telemetry || []);
             setResultsDate(new Date().toISOString());
             setFinalDuration(res.duration_ms ? Math.round(res.duration_ms / 1000) : Math.round((Date.now() - startTimeRef.current) / 1000));
             ExecutionService.getExecutionHistory(id).then(setExecHistory);
@@ -827,6 +906,12 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
                         {(videoUploading || videoRestoring) && <span className="text-xs text-indigo-400 font-bold mt-2 animate-pulse">{videoRestoring ? 'Restoring encrypted face video from cloud...' : 'Uploading face video locally and to cloud...'}</span>}
                         <input type="file" accept="video/mp4" onChange={handleVideoUpload} className="hidden" />
                       </label>
+                    )}
+                    {videoRestoreError && (
+                      <div className="flex items-start justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-[11px] text-amber-300">
+                        <span>Cloud video restore failed: {videoRestoreError}</span>
+                        <button type="button" onClick={() => { setVideoRestoreError(''); setVideoPath(''); }} className="font-bold underline">Retry</button>
+                      </div>
                     )}
                   </div>
                 )}
@@ -1295,8 +1380,15 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
                 <p className="section-label">Total Execution Time</p>
                 {executing ? (
                   <>
-                    <p className="text-xl font-black mt-1 text-primary">Average: {formatTime(totalEstimatedTime)}</p>
-                    <p className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold mt-1">Countdown: {formatTime(countdown)}</p>
+                    <p className="text-xl font-black mt-1 text-primary">Elapsed: {formatTime(elapsedSeconds)}</p>
+                    <p className="text-[10px] text-muted font-semibold mt-1">
+                      {estimateLearning ? 'Initial estimate' : 'History-based estimate'}: {formatTime(totalEstimatedTime)}
+                    </p>
+                    <p className={`text-[10px] font-semibold mt-1 ${elapsedSeconds > totalEstimatedTime ? 'text-amber-500' : 'text-indigo-600 dark:text-indigo-400'}`}>
+                      {elapsedSeconds > totalEstimatedTime
+                        ? `Estimate exceeded by ${formatTime(elapsedSeconds - totalEstimatedTime)} · test is still running`
+                        : `Estimated remaining: ${formatTime(countdown)}`}
+                    </p>
                   </>
                 ) : (
                   <>
@@ -1313,11 +1405,13 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
                 <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1 scrollbar-thin">
                   {executionLogs.map((log, i) => {
                     const isFailed = log.status === 'failed' || log.status === 'Failed';
+                    const isSkipped = isSkippedLog(log);
                     return (
                       <div key={i} className={`card !rounded-xl p-3 flex items-center justify-between text-xs font-mono border ${isFailed ? 'border-red-500/30 bg-red-500/5' : 'border-slate-200 dark:border-zinc-800'}`}>
                         <div className="flex items-center gap-2">
                           {log.status === 'passed' && <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0" />}
                           {log.status === 'failed' && <XCircle size={16} className="text-red-500 flex-shrink-0" />}
+                          {isSkipped && <AlertCircle size={16} className="text-amber-500 flex-shrink-0" />}
                           {log.status === 'running' && <RefreshCw size={16} className="text-amber-400 animate-spin flex-shrink-0" />}
                           {(() => {
                             let action = log.action || '';
@@ -1397,11 +1491,25 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
         {/* RESULTS */}
         {activeTab === 'results' && (() => {
           const passedCount = resultsLogs.filter(l => l.status === 'passed' || l.status === 'Passed').length;
-          const failedCount = resultsLogs.filter(l => l.status === 'failed' || l.status === 'Failed').length;
-          const successRate = resultsLogs.length > 0 ? Math.round((passedCount / resultsLogs.length) * 100) : 100;
-          const resultsHasFailures = resultsLogs.some(l => l.status === 'failed' || l.status === 'Failed');
-          const failedStep = resultsLogs.find(l => l.status === 'failed' || l.status === 'Failed');
-          const isApiOrNetworkFailure = failedStep && (failedStep.action === 'goto' || failedStep.error_message?.toLowerCase().includes('api') || failedStep.error_message?.toLowerCase().includes('network') || failedStep.error_message?.toLowerCase().includes('http') || failedStep.error_message?.toLowerCase().includes('fetch'));
+          const failedCount = resultsLogs.filter(isFailedLog).length;
+          const skippedCount = resultsLogs.filter(isSkippedLog).length;
+          const auditedCount = passedCount + failedCount;
+          const successRate = auditedCount > 0 ? Math.round((passedCount / auditedCount) * 100) : 0;
+          const resultsHasFailures = failedCount > 0;
+          const failedStep = resultsLogs.find(isFailedLog);
+          const failure = classifyFailure(failedStep);
+          const httpSpans = resultsTelemetry.filter(span => span?.attributes?.type === 'http');
+          const networkFailures = httpSpans.filter(span =>
+            String(span.status_code).toUpperCase() === 'ERROR' || Number(span?.attributes?.http_status || 0) >= 400
+          );
+          const loginFill = resultsLogs.find(log => log.action === 'fill' && /email|user|login/.test(String(log.target).toLowerCase()));
+          const passwordFill = resultsLogs.find(log => log.action === 'fill' && /password|passwd|pwd/.test(String(log.target).toLowerCase()));
+          const authRows = [
+            ['USERNAME LOGIN', loginFill ? (isFailedLog(loginFill) ? 'FAILED' : 'PASSED') : 'NOT OBSERVED'],
+            ['PASSWORD LOGIN', passwordFill ? (isFailedLog(passwordFill) ? 'FAILED' : 'PASSED') : 'NOT OBSERVED'],
+            ['FACE VIDEO', project?.face_auth_enabled ? (faceVideoStoragePath ? 'CONFIGURED' : 'MISSING') : 'NOT ENABLED'],
+            ['VIRTUAL WEBCAM', project?.face_auth_enabled ? (videoPath ? 'AVAILABLE LOCALLY' : 'NOT AVAILABLE') : 'NOT ENABLED']
+          ];
           return (
             <div className="space-y-6 max-w-7xl">
               <div className="grid grid-cols-4 gap-4">
@@ -1445,13 +1553,13 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
                 <div className="card p-6 space-y-4">
                   <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800 pb-3">
                     <h3 className="section-label">Authentication &amp; Biometric Summary</h3>
-                    <span className="badge badge-success">Verified</span>
+                    <span className="badge badge-indigo">Observed State</span>
                   </div>
                   <div className="grid grid-cols-2 gap-3 text-xs font-mono">
-                    {[['USERNAME LOGIN','✓ PASS'],['PASSWORD LOGIN','✓ PASS'],['FACE VERIFICATION','✓ PASS'],['VIRTUAL WEBCAM','Started']].map(([k,v]) => (
+                    {authRows.map(([k,v]) => (
                       <div key={k} className="p-3 rounded-xl bg-slate-50 dark:bg-zinc-900">
                         <span className="text-muted block text-[10px]">{k}</span>
-                        <span className="text-emerald-600 dark:text-emerald-400 font-bold">{v}</span>
+                        <span className={`font-bold ${/FAILED|MISSING|NOT AVAILABLE/.test(v) ? 'text-red-500' : /PASSED|CONFIGURED|AVAILABLE/.test(v) ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted'}`}>{v}</span>
                       </div>
                     ))}
                   </div>
@@ -1471,13 +1579,16 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
                   ) : (
                     resultsLogs.map((log, i) => {
                       const isFailed = log.status === 'failed' || log.status === 'Failed';
+                      const isSkipped = isSkippedLog(log);
                       return (
                         <div key={i} className={`card !rounded-xl p-3.5 border ${isFailed ? 'border-red-500/30 bg-red-500/5' : 'border-slate-100 dark:border-zinc-800'} text-xs font-mono`}>
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
-                              {isFailed 
+                              {isFailed
                                 ? <XCircle size={16} className="text-red-500 flex-shrink-0" />
-                                : <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0" />
+                                : isSkipped
+                                  ? <AlertCircle size={16} className="text-amber-500 flex-shrink-0" />
+                                  : <CheckCircle2 size={16} className="text-emerald-500 flex-shrink-0" />
                               }
                               <span className="text-primary">
                                 <span className="text-indigo-400 font-bold uppercase">{log.action === 'goto' && i === 0 ? 'Browser Launch / Network Init' : log.action}</span>
@@ -1492,7 +1603,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
                                   <Eye size={12}/> Screenshot
                                 </button>
                               )}
-                              <span className={`badge ${isFailed ? 'badge-error' : 'badge-success'} text-[10px]`}>
+                              <span className={`badge ${isFailed ? 'badge-error' : isSkipped ? 'badge-warning' : 'badge-success'} text-[10px]`}>
                                 {log.status?.toUpperCase()}
                               </span>
                             </div>
@@ -1520,14 +1631,14 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="card p-5 flex items-center justify-between">
                     <span className="section-label">Intercepted Network API Failures</span>
-                    <span className={`text-2xl font-black ${resultsHasFailures && isApiOrNetworkFailure ? 'text-red-500' : 'text-primary'}`}>
-                      {resultsHasFailures && isApiOrNetworkFailure ? 1 : 0}
+                    <span className={`text-2xl font-black ${networkFailures.length ? 'text-red-500' : 'text-primary'}`}>
+                      {networkFailures.length}
                     </span>
                   </div>
                   <div className="card p-5 flex items-center justify-between">
                     <span className="section-label">OpenTelemetry Trace Spans</span>
                     <span className="text-2xl font-black text-primary">
-                      {resultsLogs.length > 0 ? resultsLogs.length * 14 : 126}
+                      {resultsTelemetry.length}
                     </span>
                   </div>
                 </div>
@@ -1535,15 +1646,17 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
                 <div className="card p-6 space-y-4">
                   <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800 pb-3">
                     <h3 className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">Frontend Diagnostics &amp; Recommended Fix</h3>
-                    <span className="badge badge-indigo">Playwright UI Agent</span>
+                    <span className="badge badge-indigo">Execution Diagnostics</span>
                   </div>
                   <div className="space-y-3 text-xs">
                     <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-1">
                       <span className="text-red-600 dark:text-red-400 font-bold block">🔴 FRONTEND FINDING (Playwright):</span>
                       {resultsHasFailures ? (
                         <>
-                          <p className="text-secondary">1. UI step warnings detected during execution.</p>
-                          <p className="text-secondary">2. Playwright selector failed on action "{failedStep?.action}" for target "{failedStep?.target}".</p>
+                          <p className="text-secondary">Root category: {failure.category}.</p>
+                          <p className="text-secondary">Failed action "{failedStep?.action}" for target "{failedStep?.target || 'N/A'}".</p>
+                          <p className="text-secondary">{failedStep?.error_message}</p>
+                          {skippedCount > 0 && <p className="text-secondary">{skippedCount} dependent step(s) were skipped to avoid misleading cascade failures.</p>}
                         </>
                       ) : (
                         <p className="text-secondary">1. All test steps completed successfully with zero page assertion failures.</p>
@@ -1552,7 +1665,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
                     <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-1">
                       <span className="text-amber-600 dark:text-amber-400 font-bold block">💡 FRONTEND RECOMMENDED FIX:</span>
                       {resultsHasFailures ? (
-                        <p className="text-secondary">1. Inspect failure screenshot and verify Playwright element selectors for "{failedStep?.target}".</p>
+                        <p className="text-secondary">{failure.recommendation}</p>
                       ) : (
                         <p className="text-secondary">1. UI state healthy. Maintain selector stability.</p>
                       )}
@@ -1563,32 +1676,33 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
                 <div className="card p-6 space-y-4">
                   <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800 pb-3">
                     <h3 className="section-label">Backend OpenTelemetry Diagnostics</h3>
-                    <span className="badge badge-indigo">OTel Ingestion Agent</span>
+                    <span className="badge badge-indigo">Observed Browser Traffic</span>
                   </div>
                   <div className="space-y-3 text-xs">
                     <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-1">
                       <span className="text-violet-600 dark:text-violet-400 font-bold block">⚙ BACKEND FINDING (OpenTelemetry Spans):</span>
-                      {resultsHasFailures && isApiOrNetworkFailure ? (
+                      {networkFailures.length > 0 ? (
                         <>
-                          <p className="text-secondary">1. Silent API call failure detected during page automation.</p>
-                          <p className="text-secondary">2. Intercepted microservice call returned status code 500.</p>
+                          <p className="text-secondary">{networkFailures.length} observed request(s) returned an error.</p>
+                          {networkFailures.slice(0, 3).map((span, index) => (
+                            <p key={span.id || index} className="text-secondary">{span.attributes?.method || 'REQUEST'} {span.attributes?.url || span.name}: HTTP {span.attributes?.http_status || 'transport failure'}</p>
+                          ))}
                         </>
+                      ) : httpSpans.length > 0 ? (
+                        <p className="text-secondary">{httpSpans.length} browser request(s) were observed with no HTTP or transport failures.</p>
                       ) : (
-                        <>
-                          <p className="text-secondary">1. OpenTelemetry trace spans recorded.</p>
-                          <p className="text-secondary">2. Microservices and API endpoints returned 200 OK status codes.</p>
-                        </>
+                        <p className="text-secondary">No browser network spans were collected for this run, so backend health cannot be concluded from this result.</p>
                       )}
                     </div>
                     <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-1">
                       <span className="text-violet-600 dark:text-violet-400 font-bold block">⚙ BACKEND RECOMMENDED FIX:</span>
-                      {resultsHasFailures && isApiOrNetworkFailure ? (
+                      {networkFailures.length > 0 ? (
                         <>
                           <p className="text-secondary">1. Verify backend API response status codes and database query latency.</p>
                           <p className="text-secondary">2. Check backend application logs for stack traces.</p>
                         </>
                       ) : (
-                        <p className="text-secondary">1. No backend API or microservices issues detected.</p>
+                        <p className="text-secondary">No network remediation is suggested from the available evidence.</p>
                       )}
                     </div>
                   </div>

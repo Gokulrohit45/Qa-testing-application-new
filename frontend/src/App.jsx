@@ -38,7 +38,8 @@ export default function App() {
       ProjectService.listProjects().then((list) => {
         setProjects(list);
         if (list.length > 0 && !selectedProject) {
-          setSelectedProject(list[0]);
+          const remembered = localStorage.getItem('qa_last_project_id');
+          setSelectedProject(list.find(project => String(project.id) === remembered) || list[0]);
         }
         Promise.all(list.map(project => ExecutionService.getExecutionHistory(project.id)))
           .then(groups => setExecutions(groups.flat()))
@@ -178,6 +179,10 @@ export default function App() {
                     <div className="p-6">
                       <ProjectDetails
                         projects={projects}
+                        onSelectProject={project => {
+                          setSelectedProject(project);
+                          localStorage.setItem('qa_last_project_id', String(project.id));
+                        }}
                         onDeleteProject={(deletedId) => {
                           const updated = projects.filter(p => String(p.id) !== String(deletedId));
                           setProjects(updated);

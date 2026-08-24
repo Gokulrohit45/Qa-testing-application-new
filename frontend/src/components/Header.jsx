@@ -13,17 +13,12 @@ export default function Header({ selectedProject }) {
 
   useEffect(() => {
     function getUserData() {
-      const stored = localStorage.getItem('user');
-      if (stored) {
-        try { setCurrentUser(JSON.parse(stored)); } catch (e) { setCurrentUser(null); }
-      } else {
-        AuthenticationService.getProfile().then(user => {
-          if (user) {
-            setCurrentUser(user);
-            localStorage.setItem('user', JSON.stringify(user));
-          }
-        });
-      }
+      AuthenticationService.getProfile().then(user => {
+        if (user) {
+          setCurrentUser(user);
+          localStorage.setItem('user', JSON.stringify(user));
+        }
+      });
     }
     getUserData();
 

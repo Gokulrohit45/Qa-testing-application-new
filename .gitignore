@@ -14,3 +14,4 @@ python-installer.exe
 /.smoke-data/
 /build/
 /*.spec
+/officehub360_full_navigation_test.csv
