@@ -35,7 +35,7 @@ export default function Home() {
       {/* Hero Section */}
       <section className="max-w-6xl mx-auto px-6 pt-16 pb-20 text-center relative z-10">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-indigo-500/20 bg-indigo-500/5 text-[10px] font-bold text-indigo-400 uppercase tracking-widest mb-6">
-          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" /> Desktop App v2.0.0 Available Now
+          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" /> Desktop App v1.0.1 Available Now
         </div>
         <h1 className="text-4xl md:text-6xl font-black text-white tracking-tight leading-[1.1] max-w-4xl mx-auto">
           Autonomous E2E Testing <br />
