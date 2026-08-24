@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Briefcase, Play, CheckCircle2, XCircle, Clock, ArrowRight, TrendingUp, Activity, Layers, Globe, PlusCircle, Trash2 } from 'lucide-react';
+import { Briefcase, Play, CheckCircle2, XCircle, Clock, ArrowRight, Activity, Layers, Globe, PlusCircle, Trash2 } from 'lucide-react';
 
 export default function Dashboard({ projects, executions, onDeleteProject }) {
   const [deleteModalProj, setDeleteModalProj] = useState(null);
@@ -8,7 +8,6 @@ export default function Dashboard({ projects, executions, onDeleteProject }) {
   const totalRuns = executions.length;
   const passed    = executions.filter(e => e.status === 'Passed').length;
   const failed    = executions.filter(e => e.status === 'Failed').length;
-  const rate      = totalRuns > 0 ? Math.round((passed / totalRuns) * 100) : 0;
 
   const confirmDelete = async () => {
     if (deleteModalProj && onDeleteProject) {
@@ -31,10 +30,9 @@ export default function Dashboard({ projects, executions, onDeleteProject }) {
       </div>
 
       {/* Metrics */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <MetricCard label="Total Projects"    value={projects.length}  icon={<Layers size={18}    className="text-indigo-600 dark:text-indigo-400" />}  iconBg="bg-indigo-50 dark:bg-indigo-500/10 border-indigo-100 dark:border-indigo-500/20" trend="+2 this month" />
         <MetricCard label="Total Runs"        value={totalRuns}        icon={<Activity size={18}  className="text-violet-600 dark:text-violet-400"  />}  iconBg="bg-violet-50 dark:bg-violet-500/10 border-violet-100 dark:border-violet-500/20"  trend={`${passed} passed`} />
-        <MetricCard label="Success Rate"      value={`${rate}%`}       icon={<TrendingUp size={18} className="text-emerald-600 dark:text-emerald-400"  />} iconBg="bg-emerald-50 dark:bg-emerald-500/10 border-emerald-100 dark:border-emerald-500/20" trend="↑ vs last week" positive />
         <MetricCard label="Failures"          value={failed}           icon={<XCircle size={18}   className="text-red-600 dark:text-red-400"        />}  iconBg="bg-red-50 dark:bg-red-500/10 border-red-100 dark:border-red-500/20"         trend={failed > 0 ? "Needs attention" : "All clear"} negative={failed > 0} />
       </div>
 

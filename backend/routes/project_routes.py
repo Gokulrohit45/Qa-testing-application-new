@@ -26,7 +26,7 @@ def create_project():
 def update_project(project_id):
     current = get("project", project_id)
     if not current: return jsonify({"error": "Project not found"}), 404
-    allowed = {"name", "app_name", "app_url", "description", "face_auth_enabled", "video_file_path", "sync_state"}
+    allowed = {"name", "app_name", "app_url", "description", "face_auth_enabled", "video_file_path", "face_video_storage_path", "sync_state"}
     current.update({key: value for key, value in (request.json or {}).items() if key in allowed})
     current["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ")
     upsert("project", current)

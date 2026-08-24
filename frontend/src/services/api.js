@@ -51,7 +51,7 @@ export function getNormalizedUserId(session) {
 function pickFields(value, fields) {
   return Object.fromEntries(fields.filter(key => value[key] !== undefined).map(key => [key, value[key]]));
 }
-const PROJECT_CLOUD_FIELDS = ['id', 'user_id', 'name', 'app_name', 'app_url', 'description', 'face_auth_enabled', 'created_at', 'updated_at'];
+const PROJECT_CLOUD_FIELDS = ['id', 'user_id', 'name', 'app_name', 'app_url', 'description', 'face_auth_enabled', 'face_video_storage_path', 'created_at', 'updated_at'];
 const TESTCASE_CLOUD_FIELDS = ['id', 'project_id', 'user_id', 'name', 'type', 'commands', 'cached_json', 'status', 'created_at', 'updated_at'];
 
 // ─── AUTH SERVICE ──────────────────────────────────────────────────────────────
@@ -148,7 +148,14 @@ export const ProjectService = {
               }
             } catch (e) {}
           }
-          if (p?.id && !projectsMap.has(p.id)) projectsMap.set(p.id, p);
+          if (p?.id) {
+            const cloudProject = projectsMap.get(p.id);
+            projectsMap.set(p.id, cloudProject ? {
+              ...cloudProject,
+              ...(p.video_file_path ? { video_file_path: p.video_file_path } : {}),
+              ...(p.sync_state ? { sync_state: p.sync_state } : {})
+            } : p);
+          }
         }
       }
     } catch (e) {}
@@ -156,7 +163,14 @@ export const ProjectService = {
     // 3. localStorage fallback
     try {
       const lsProjects = JSON.parse(localStorage.getItem('qa_projects') || '[]');
-      lsProjects.filter(p => p.user_id === userId).forEach(p => { if (p?.id && !projectsMap.has(p.id)) projectsMap.set(p.id, p); });
+      lsProjects.filter(p => p.user_id === userId).forEach(p => {
+        if (!p?.id) return;
+        const current = projectsMap.get(p.id);
+        projectsMap.set(p.id, current ? {
+          ...current,
+          ...(p.video_file_path ? { video_file_path: p.video_file_path } : {})
+        } : p);
+      });
     } catch (e) {}
 
     const result = Array.from(projectsMap.values());
@@ -211,6 +225,14 @@ export const ProjectService = {
   },
 
   async deleteProject(projectId) {
+    const session = await AuthenticationService.getCurrentSession();
+    if (session?.user?.id) {
+      const folder = `${session.user.id}/${projectId}`;
+      const { data: objects } = await supabase.storage.from('face-videos').list(folder);
+      if (objects?.length) {
+        await supabase.storage.from('face-videos').remove(objects.map(item => `${folder}/${item.name}`));
+      }
+    }
     const { error } = await supabase.from('projects').delete().eq('id', projectId);
     if (error) throw new Error(`Cloud deletion failed: ${error.message}`);
     await fetchLocal(`/projects/${projectId}`, { method: 'DELETE' });
@@ -445,6 +467,33 @@ export const AssetService = {
     const res = await fetch(`${LOCAL_FLASK_URL}/upload-video`, { method: 'POST', headers: LOCAL_API_TOKEN ? { 'X-QA-AI-Token': LOCAL_API_TOKEN } : {}, body: formData });
     if (!res.ok) throw new Error('Video upload failed');
     return await res.json();
+  },
+
+  async uploadFaceVideo(file, projectId) {
+    const session = await AuthenticationService.getCurrentSession();
+    if (!session?.user?.id) throw new Error('You must be signed in to upload a face video');
+    const fileName = file?.name?.toLowerCase() || '';
+    if (!file || (file.type !== 'video/mp4' && !fileName.endsWith('.mp4'))) {
+      throw new Error('Face video must be an MP4 file');
+    }
+
+    const localResult = await this.uploadVideo(file, projectId);
+    const storagePath = `${session.user.id}/${projectId}/face-video.mp4`;
+    const { error } = await supabase.storage.from('face-videos').upload(storagePath, file, {
+      upsert: true,
+      contentType: 'video/mp4',
+      cacheControl: '3600'
+    });
+    if (error) throw new Error(`Cloud face-video upload failed: ${error.message}`);
+    return { ...localResult, storage_path: storagePath };
+  },
+
+  async restoreFaceVideo(storagePath, projectId) {
+    if (!storagePath) throw new Error('Face-video storage path is missing');
+    const { data, error } = await supabase.storage.from('face-videos').download(storagePath);
+    if (error) throw new Error(`Cloud face-video download failed: ${error.message}`);
+    const file = new File([data], 'face-video.mp4', { type: 'video/mp4' });
+    return await this.uploadVideo(file, projectId);
   },
 
   async uploadAsset(file, projectId) {

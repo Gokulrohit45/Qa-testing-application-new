@@ -5,8 +5,8 @@ export default function Home() {
 
   const handleDownloadWindows = () => {
     const link = document.createElement('a');
-    link.href = 'https://github.com/Gokulrohit45/Qa-testing-application-new/releases/download/v1.0.1/QA-AI-Platform-1.0.1-x64.zip';
-    link.download = 'QA-AI-Platform-1.0.1-x64.zip';
+    link.href = 'https://github.com/Gokulrohit45/Qa-testing-application-new/releases/download/v1.0.2/QA-AI-Platform-1.0.2-x64.exe';
+    link.download = 'QA-AI-Platform-1.0.2-x64.exe';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -35,7 +35,7 @@ export default function Home() {
       {/* Hero Section */}
       <section className="max-w-6xl mx-auto px-6 pt-16 pb-20 text-center relative z-10">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-indigo-500/20 bg-indigo-500/5 text-[10px] font-bold text-indigo-400 uppercase tracking-widest mb-6">
-          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" /> Desktop App v1.0.1 Available Now
+          <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" /> Desktop App v1.0.2 Available Now
         </div>
         <h1 className="text-4xl md:text-6xl font-black text-white tracking-tight leading-[1.1] max-w-4xl mx-auto">
           Autonomous E2E Testing <br />
@@ -50,9 +50,9 @@ export default function Home() {
         {/* Hero CTA Download Options */}
         <div className="flex flex-wrap items-center justify-center gap-4 mt-10">
           <button onClick={handleDownloadWindows} className="px-6 py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black transition-all flex items-center gap-2.5 shadow-lg shadow-indigo-600/35 hover:-translate-y-0.5">
-            <Download size={15}/> Download for Windows (.zip)
+            <Download size={15}/> Download for Windows (.exe)
           </button>
-          <a href="https://github.com/Gokulrohit45/Qa-testing-application-new/releases/tag/v1.0.1" target="_blank" rel="noopener noreferrer" className="px-6 py-3.5 rounded-2xl bg-slate-900 border border-slate-800 hover:bg-slate-800 hover:border-slate-700 text-white text-xs font-black transition-all flex items-center gap-2.5 hover:-translate-y-0.5">
+          <a href="https://github.com/Gokulrohit45/Qa-testing-application-new/releases/tag/v1.0.2" target="_blank" rel="noopener noreferrer" className="px-6 py-3.5 rounded-2xl bg-slate-900 border border-slate-800 hover:bg-slate-800 hover:border-slate-700 text-white text-xs font-black transition-all flex items-center gap-2.5 hover:-translate-y-0.5">
             <Monitor size={15} className="text-indigo-400"/> View All Releases
           </a>
         </div>

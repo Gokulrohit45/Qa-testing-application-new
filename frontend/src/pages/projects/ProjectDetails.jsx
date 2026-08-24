@@ -71,7 +71,9 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
 
   // Video State
   const [videoPath, setVideoPath] = useState(project?.video_file_path || '');
+  const [faceVideoStoragePath, setFaceVideoStoragePath] = useState(project?.face_video_storage_path || '');
   const [videoUploading, setVideoUploading] = useState(false);
+  const [videoRestoring, setVideoRestoring] = useState(false);
 
   // Assets State
   const [assets, setAssets] = useState([]);
@@ -115,6 +117,46 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
   useEffect(() => {
     return () => { if (pollingRef.current) clearInterval(pollingRef.current); };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!id) return () => { cancelled = true; };
+    ProjectService.listProjects().then(list => {
+      if (cancelled) return;
+      const refreshed = list.find(item => String(item.id) === String(id));
+      if (refreshed?.video_file_path) setVideoPath(refreshed.video_file_path);
+      if (refreshed?.face_video_storage_path) setFaceVideoStoragePath(refreshed.face_video_storage_path);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (project?.video_file_path) {
+      setVideoPath(project.video_file_path);
+      return () => { cancelled = true; };
+    }
+    if (!id || !faceVideoStoragePath || videoPath || videoRestoring) {
+      return () => { cancelled = true; };
+    }
+
+    setVideoRestoring(true);
+    AssetService.restoreFaceVideo(faceVideoStoragePath, id)
+      .then(async res => {
+        if (cancelled || !res?.y4m_path) return;
+        setVideoPath(res.y4m_path);
+        await ProjectService.updateProject(id, {
+          video_file_path: res.y4m_path,
+          face_video_storage_path: faceVideoStoragePath
+        });
+      })
+      .catch(error => {
+        if (!cancelled) console.warn('Face video could not be restored from cloud:', error.message);
+      })
+      .finally(() => { if (!cancelled) setVideoRestoring(false); });
+
+    return () => { cancelled = true; };
+  }, [id, project?.video_file_path, faceVideoStoragePath]);
 
   const formatTime = (secs) => {
     const m = Math.floor(secs / 60).toString().padStart(2, '0');
@@ -490,10 +532,14 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
     if (!file) return;
     setVideoUploading(true);
     try {
-      const res = await AssetService.uploadVideo(file, id);
+      const res = await AssetService.uploadFaceVideo(file, id);
       if (res?.y4m_path) {
         setVideoPath(res.y4m_path);
-        await ProjectService.updateProject(id, { video_file_path: res.y4m_path });
+        setFaceVideoStoragePath(res.storage_path);
+        await ProjectService.updateProject(id, {
+          video_file_path: res.y4m_path,
+          face_video_storage_path: res.storage_path
+        });
       }
     } catch (err) { alert('Video upload failed: ' + err.message); }
     finally { setVideoUploading(false); }
@@ -759,7 +805,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
                 {project.face_auth_enabled && (
                   <div className="p-4 rounded-xl border border-indigo-500/30 bg-slate-950/60 space-y-3">
                     <p className="text-xs font-semibold text-indigo-300 flex items-center gap-1.5">
-                      <Activity size={13}/> Virtual Webcam Biometric Input Video (.mp4 / .y4m)
+                      <Activity size={13}/> Virtual Webcam Biometric Input Video (.mp4)
                     </p>
                     {(project.video_file_path || videoPath) ? (
                       <div className="space-y-3">
@@ -769,7 +815,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
                         <div className="flex gap-2">
                           <label className="flex-1 px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold text-center cursor-pointer transition-colors flex items-center justify-center gap-1.5">
                             <Upload size={12}/> Replace Video
-                            <input type="file" accept="video/mp4,video/y4m" onChange={handleVideoUpload} className="hidden" />
+                            <input type="file" accept="video/mp4" onChange={handleVideoUpload} className="hidden" />
                           </label>
                         </div>
                       </div>
@@ -777,9 +823,9 @@ export default function ProjectDetails({ projects = [], onDeleteProject }) {
                       <label className="border-2 border-dashed border-indigo-500/40 rounded-xl p-5 flex flex-col items-center justify-center cursor-pointer hover:bg-indigo-950/30 transition-all">
                         <Upload size={22} className="text-indigo-400 mb-1.5"/>
                         <span className="text-xs font-bold text-indigo-200">Upload Face Verification Test Video</span>
-                        <span className="text-[10px] text-slate-400 mt-0.5">Supported Formats: MP4, Y4M</span>
-                        {videoUploading && <span className="text-xs text-indigo-400 font-bold mt-2 animate-pulse">Uploading face video...</span>}
-                        <input type="file" accept="video/mp4,video/y4m" onChange={handleVideoUpload} className="hidden" />
+                        <span className="text-[10px] text-slate-400 mt-0.5">Supported Format: MP4</span>
+                        {(videoUploading || videoRestoring) && <span className="text-xs text-indigo-400 font-bold mt-2 animate-pulse">{videoRestoring ? 'Restoring encrypted face video from cloud...' : 'Uploading face video locally and to cloud...'}</span>}
+                        <input type="file" accept="video/mp4" onChange={handleVideoUpload} className="hidden" />
                       </label>
                     )}
                   </div>

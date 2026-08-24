@@ -60,6 +60,14 @@ class ApiTests(unittest.TestCase):
         listed = self.client.get(f"/api/projects?user_id={user_id}", headers=self.headers).get_json()
         self.assertEqual([item["id"] for item in listed], [project_id])
 
+        update = self.client.put(f"/api/projects/{project_id}", headers=self.headers, json={
+            "video_file_path": "D:/cache/face-video.y4m",
+            "face_video_storage_path": f"{user_id}/{project_id}/face-video.mp4"
+        })
+        self.assertEqual(update.status_code, 200)
+        self.assertEqual(update.get_json()["video_file_path"], "D:/cache/face-video.y4m")
+        self.assertTrue(update.get_json()["face_video_storage_path"].endswith("/face-video.mp4"))
+
     def test_invalid_execution_is_rejected(self):
         response = self.client.post("/api/execute", headers=self.headers, json={
             "project_id": "p", "app_url": "https://example.com",
