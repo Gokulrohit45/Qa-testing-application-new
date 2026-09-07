@@ -10,8 +10,7 @@ from pathlib import Path
 _TEMP_HOME = tempfile.TemporaryDirectory()
 os.environ["QA_AI_DESKTOP"] = "1"
 os.environ["LOCAL_API_TOKEN"] = "test-token"
-os.environ["USERPROFILE"] = _TEMP_HOME.name
-os.environ["HOME"] = _TEMP_HOME.name
+os.environ["QA_AI_DATA_DIR"] = _TEMP_HOME.name
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import create_app
@@ -48,6 +47,21 @@ class ApiTests(unittest.TestCase):
         response = self.client.get("/api/health", headers=self.headers)
         self.assertEqual(response.status_code, 200)
         self.assertIn("playwright_available", response.get_json())
+        self.assertFalse(response.get_json()["capabilities"]["desktop_execution"])
+
+    def test_desktop_metadata_cannot_execute_as_web(self):
+        response = self.client.post("/api/projects", headers=self.headers, json={
+            "name": "Desktop pilot", "user_id": "desktop-test-user", "project_type": "desktop"
+        })
+        self.assertEqual(response.status_code, 201)
+        project = response.get_json()
+        self.assertIsNone(project["app_url"])
+        result = self.client.post("/api/execute", headers=self.headers, json={
+            "project_id": project["id"], "app_url": "https://example.com",
+            "steps": [{"action": "click", "target": "Save"}]
+        })
+        self.assertEqual(result.status_code, 409)
+        self.assertEqual(result.get_json()["code"], "UNSUPPORTED_RUNNER")
 
     def test_project_round_trip_preserves_uuid(self):
         project_id = "35d762e5-3ceb-44cd-b8a2-cb1f8302b91c"

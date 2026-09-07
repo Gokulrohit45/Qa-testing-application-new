@@ -5,7 +5,8 @@ import threading
 from pathlib import Path
 from config import SCREENSHOTS_DIR, EXECUTION_LOGS_DB_FILE, EXECUTIONS_DB_FILE
 from core.virtual_webcam import get_chromium_camera_args
-from core.smart_selectors import smart_fill, smart_click
+from core.smart_selectors import smart_fill, smart_click, smart_select, resolve_target
+from core.assertions import check_outcome, OutcomeError
 from utils.logger import logger
 from utils.local_store import get as store_get, upsert as store_upsert
 
@@ -28,6 +29,17 @@ STORAGE_LOCK = threading.RLock()
 def _is_sensitive_target(target):
     lowered = str(target).lower()
     return any(word in lowered for word in ("password", "passwd", "pwd", "secret", "token", "api key", "otp"))
+
+def _redact_runtime(value, secrets):
+    if isinstance(value, dict):
+        return {key: _redact_runtime(item, secrets) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_runtime(item, secrets) for item in value]
+    if isinstance(value, str):
+        for secret in sorted(set(secrets), key=len, reverse=True):
+            if secret:
+                value = value.replace(secret, '[REDACTED]')
+    return value
 
 def load_json_file(file_path, default=None):
     if default is None:
@@ -98,6 +110,9 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
     root_span_id = uuid.uuid4().hex[:16]
     has_error = False
     global_err_msg = None
+    runtime_secrets = [value for step in steps for value in step.get('_runtime_secrets', [])]
+    def redact(value):
+        return _redact_runtime(value, runtime_secrets)
 
     try:
         with sync_playwright() as p:
@@ -140,7 +155,7 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                     "url": response.url.split('?')[0], "http_status": response.status,
                     "step_number": observed["step_number"], "step_action": observed["step_action"],
                     "step_target": observed["step_target"]}, root_span_id))
-                _record_telemetry(execution_id, spans)
+                _record_telemetry(execution_id, redact(spans))
             def on_request_failed(request):
                 observed = request_start(request)
                 spans.append(_new_span(execution_id, trace_id, f"HTTP FAILED {request.method} {request.url.split('?')[0]}", observed["started"],
@@ -148,7 +163,7 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                     "failure": str(request.failure or "Request failed"),
                     "step_number": observed["step_number"], "step_action": observed["step_action"],
                     "step_target": observed["step_target"]}, root_span_id))
-                _record_telemetry(execution_id, spans)
+                _record_telemetry(execution_id, redact(spans))
             page.on("request", on_request)
             page.on("response", on_response)
             page.on("requestfailed", on_request_failed)
@@ -156,7 +171,8 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
             page.set_default_timeout(action_timeout)
 
             # Step 1: Default navigation to app_url if provided
-            if app_url:
+            initial_navigation_added = bool(app_url and not (steps and steps[0].get("action") == "goto" and str(steps[0].get("target", "")).rstrip('/') == app_url.rstrip('/')))
+            if initial_navigation_added:
                 step_start = time.time()
                 step_num = 1
                 current_step.update({"number": step_num, "action": "goto", "target": app_url})
@@ -165,7 +181,10 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                 
                 try:
                     page.goto(app_url, wait_until="domcontentloaded", timeout=action_timeout)
-                    page.screenshot(path=str(screenshot_path))
+                    try:
+                        page.screenshot(path=str(screenshot_path), timeout=1000)
+                    except Exception:
+                        pass
                     step_dur = int((time.time() - step_start) * 1000)
                     
                     log_item = {
@@ -184,9 +203,9 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                     }
                     logs.append(log_item)
                     spans.append(_new_span(execution_id, trace_id, "playwright.goto", step_start, "OK", {"type": "step", "action": "goto", "target": app_url}, root_span_id))
-                    _record_telemetry(execution_id, spans)
-                    EXECUTION_LOGS_CACHE[execution_id] = list(logs)
-                    update_disk_execution_logs(execution_id, logs, status="Running")
+                    _record_telemetry(execution_id, redact(spans))
+                    EXECUTION_LOGS_CACHE[execution_id] = redact(logs)
+                    update_disk_execution_logs(execution_id, redact(logs), status="Running")
                 except Exception as e:
                     step_dur = int((time.time() - step_start) * 1000)
                     log_item = {
@@ -205,15 +224,14 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                     }
                     logs.append(log_item)
                     spans.append(_new_span(execution_id, trace_id, "playwright.goto", step_start, "ERROR", {"type": "step", "action": "goto", "target": app_url, "error": str(e)}, root_span_id))
-                    _record_telemetry(execution_id, spans)
-                    EXECUTION_LOGS_CACHE[execution_id] = list(logs)
+                    _record_telemetry(execution_id, redact(spans))
+                    EXECUTION_LOGS_CACHE[execution_id] = redact(logs)
                     has_error = True
                     global_err_msg = f"Failed to navigate to {app_url}: {str(e)}"
 
             # Execute translated JSON steps
             if not has_error:
-                consecutive_interaction_failures = 0
-                dependency_blocked_reason = None
+                outcomes = {}
                 for step_offset, step in enumerate(steps):
                     idx = len(logs) + 1
                     if execution_id in CANCELLED_EXECUTIONS:
@@ -226,22 +244,20 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                     raw_cmd = step.get("raw_command", f"{action} {target} {value}".strip())
                     current_step.update({"number": idx, "action": action, "target": target})
 
-                    # After a prerequisite menu/control fails, avoid spending the
-                    # full click budget on every dependent option in the same UI
-                    # chain. A synchronization/navigation step starts a new chain.
-                    if dependency_blocked_reason and action in {"click", "fill"}:
+                    # Only explicit dependencies block later independent actions.
+                    # A wait must not erase a failed prerequisite.
+                    blocked_dependencies = [d for d in step.get("depends_on", []) if outcomes.get(d) != "passed"]
+                    if blocked_dependencies:
                         logs.append({"id": str(uuid.uuid4()), "execution_id": execution_id,
                             "step_number": idx, "action": action, "target": target, "value": "",
-                            "raw_command": raw_cmd, "status": "skipped",
-                            "error_message": f"Skipped because a prerequisite interaction failed: {dependency_blocked_reason}",
+                            "raw_command": "[BLOCKED]", "status": "skipped",
+                            "error_message": f"Blocked by unsuccessful prerequisite test steps: {blocked_dependencies}",
                             "screenshot_url": None, "duration_ms": 0,
                             "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")})
-                        EXECUTION_LOGS_CACHE[execution_id] = list(logs)
-                        update_disk_execution_logs(execution_id, logs, status="Running", error_message=global_err_msg)
+                        EXECUTION_LOGS_CACHE[execution_id] = redact(logs)
+                        update_disk_execution_logs(execution_id, redact(logs), status="Running", error_message=global_err_msg)
+                        outcomes[step_offset + 1] = "skipped"
                         continue
-                    if action in {"goto", "wait", "verify", "verify_text", "upload_file"}:
-                        dependency_blocked_reason = None
-                        consecutive_interaction_failures = 0
 
                     step_start = time.time()
                     screenshot_filename = f"exec_{execution_id}_step_{idx}.png"
@@ -250,25 +266,38 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                     before_path = SCREENSHOTS_DIR / before_filename
                     step_status = "passed"
                     step_err = None
+                    action_completed = False
+                    assertion_status = "not_requested"
+                    observed = None
+                    def evidence(path):
+                        try:
+                            page.screenshot(path=str(path), timeout=1000)
+                        except Exception:
+                            pass  # Evidence capture cannot change an action/assertion result.
 
                     try:
-                        page.screenshot(path=str(before_path))
+                        evidence(before_path)
+                        deadline = time.monotonic() + action_timeout / 1000
+                        def budget():
+                            remaining = int((deadline - time.monotonic()) * 1000)
+                            if remaining <= 0:
+                                raise RuntimeError("Step timeout exhausted; no additional recovery budget remains")
+                            return remaining
                         if action == "goto":
-                            page.goto(target, wait_until="domcontentloaded", timeout=action_timeout)
+                            page.goto(target, wait_until="domcontentloaded", timeout=budget())
                         elif action == "click":
-                            res = smart_click(page, target, timeout=action_timeout)
+                            res = smart_click(page, target, timeout=budget())
                             if not res:
                                 raise RuntimeError(f"Could not click target '{target}'")
-                            try:
-                                page.wait_for_load_state("domcontentloaded", timeout=1500)
-                            except Exception:
-                                pass
                         elif action == "fill":
-                            res = smart_fill(page, target, value, timeout=action_timeout)
+                            res = smart_fill(page, target, value, timeout=budget())
                             if not res:
                                 raise RuntimeError(f"Could not fill target '{target}'")
+                        elif action == "select":
+                            smart_select(page, target, value, timeout=budget())
                         elif action == "wait":
-                            wait_ms = int(value) if str(value).isdigit() else 2000
+                            wait_ms = int(float(value))
+                            deadline += wait_ms / 1000
                             remaining = max(0, wait_ms)
                             while remaining > 0:
                                 if execution_id in CANCELLED_EXECUTIONS:
@@ -277,49 +306,35 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                                 time.sleep(interval / 1000.0)
                                 remaining -= interval
                         elif action in ["verify", "verify_text"]:
-                            clean_target = str(target).strip()
-                            for prefix in ["verify_text ", "verify_text:", "verify ", "verify:", "assert ", "check "]:
-                                if clean_target.lower().startswith(prefix):
-                                    clean_target = clean_target[len(prefix):].strip()
-                            clean_target = clean_target.strip('"\'')
-                            
-                            try:
-                                page.get_by_text(clean_target, exact=False).first.wait_for(state="visible", timeout=action_timeout)
-                            except Exception:
-                                time.sleep(0.5)
-                                body_text = page.locator("body").inner_text()
-                                norm_target = " ".join(clean_target.lower().split())
-                                norm_body = " ".join(body_text.lower().split())
-                                if norm_target not in norm_body:
-                                    raw_content = page.content().lower()
-                                    if norm_target not in raw_content:
-                                        raise RuntimeError(f"Text '{clean_target}' not found on page")
+                            assertion_status = "running"
+                            observed = check_outcome(page, {"target": target, "sensitive": step.get('sensitive')}, budget())
+                            assertion_status = "passed"
                         elif action == "upload_file":
                             if not Path(value).is_file():
                                 raise RuntimeError(f"Upload file does not exist: {value}")
                             upload_target = target or "input[type='file']"
-                            try:
-                                page.locator(upload_target).first.set_input_files(value, timeout=action_timeout)
-                            except Exception:
-                                inputs = page.locator("input[type='file']")
-                                if inputs.count() == 0:
-                                    raise RuntimeError("No file input was found behind the upload control")
-                                inputs.first.set_input_files(value, timeout=action_timeout)
+                            inputs = resolve_target(page, "css:" + upload_target if not upload_target.startswith(("css:", "label:", "testid:")) else upload_target, budget(), visible=False)
+                            inputs.set_input_files(value, timeout=budget())
                         else:
                             raise RuntimeError(f"Unsupported test action: {action}")
 
-                        time.sleep(0.4) # Brief pause to allow DOM render before screenshot
-                        page.screenshot(path=str(screenshot_path))
+                        action_completed = True
+                        if step.get("expected_type"):
+                            assertion_status = "running"
+                            observed = check_outcome(page, step, budget())
+                            assertion_status = "passed"
+                        evidence(screenshot_path)
                     except Exception as e:
                         step_status = "failed"
-                        step_err = str(e)
+                        step_err = redact(str(e))
+                        if assertion_status == "running":
+                            assertion_status = "failed"
+                        if isinstance(e, OutcomeError):
+                            observed = e.observed
                         has_error = True
                         if not global_err_msg:
                             global_err_msg = step_err
-                        try:
-                            page.screenshot(path=str(screenshot_path))
-                        except Exception:
-                            pass
+                        evidence(screenshot_path)
 
                     step_dur = int((time.time() - step_start) * 1000)
                     log_item = {
@@ -328,9 +343,14 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                         "step_number": idx,
                         "action": action,
                         "target": target,
-                        "value": (step.get("asset_name") or Path(value).name) if action == "upload_file" else ("[REDACTED]" if action == "fill" and _is_sensitive_target(target) else str(value)),
-                        "raw_command": f"fill {target} [REDACTED]" if action == "fill" and _is_sensitive_target(target) else raw_cmd,
+                        "value": (step.get("asset_name") or Path(value).name) if action == "upload_file" else ("[REDACTED]" if step.get("sensitive") or action == "fill" and _is_sensitive_target(target) else str(value)),
+                        "raw_command": f"{action} {target} [REDACTED]" if step.get("sensitive") or action == "fill" and _is_sensitive_target(target) else raw_cmd,
                         "status": step_status,
+                        "action_completed": action_completed,
+                        "assertion_status": assertion_status,
+                        "expected_type": step.get("expected_type") or ("text_visible" if action in {"verify", "verify_text"} else None),
+                        "expected_value": "[REDACTED]" if step.get("sensitive") or step.get("expected_type") == "field_value" else step.get("expected_value", target if action in {"verify", "verify_text"} else ""),
+                        "observed": observed,
                         "error_message": step_err,
                         "screenshot_url": f"/api/screenshots/{screenshot_filename}" if screenshot_path.exists() else None,
                         "before_screenshot_url": f"/api/screenshots/{before_filename}" if before_path.exists() else None,
@@ -338,39 +358,41 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
                         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")
                     }
                     logs.append(log_item)
+                    outcomes[step_offset + 1] = step_status
                     spans.append(_new_span(execution_id, trace_id, f"playwright.{action}", step_start,
                         "ERROR" if step_status == "failed" else "OK",
                         {"type": "step", "step_number": idx, "action": action, "target": target,
                          "asset_name": step.get("asset_name"), "error": step_err}, root_span_id))
-                    _record_telemetry(execution_id, spans)
-                    EXECUTION_LOGS_CACHE[execution_id] = list(logs)
-                    update_disk_execution_logs(execution_id, logs, status="Running")
-                    if action in {"click", "fill"}:
-                        if step_status == "failed":
-                            consecutive_interaction_failures += 1
-                            if "blocked by" in str(step_err).lower() or consecutive_interaction_failures >= 2:
-                                dependency_blocked_reason = f"step #{idx} {action} '{target}' failed"
-                        else:
-                            consecutive_interaction_failures = 0
+                    _record_telemetry(execution_id, redact(spans))
+                    EXECUTION_LOGS_CACHE[execution_id] = redact(logs)
+                    update_disk_execution_logs(execution_id, redact(logs), status="Running")
                     is_critical = bool(step.get("critical")) or action in {"goto", "upload_file"}
                     if step_status == "failed" and is_critical:
                         for skipped in steps[step_offset + 1:]:
                             logs.append({"id": str(uuid.uuid4()), "execution_id": execution_id,
                                 "step_number": len(logs) + 1, "action": str(skipped.get("action", "wait")).lower(),
-                                "target": skipped.get("target", ""), "value": "", "raw_command": skipped.get("raw_command", ""),
+                                "target": skipped.get("target", ""), "value": "", "raw_command": "[BLOCKED]",
                                 "status": "skipped", "error_message": f"Skipped because critical step #{idx} failed: {step_err}",
                                 "screenshot_url": None, "duration_ms": 0,
                                 "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")})
-                        EXECUTION_LOGS_CACHE[execution_id] = list(logs)
-                        update_disk_execution_logs(execution_id, logs, status="Running", error_message=global_err_msg)
+                        EXECUTION_LOGS_CACHE[execution_id] = redact(logs)
+                        update_disk_execution_logs(execution_id, redact(logs), status="Running", error_message=global_err_msg)
                         break
 
+            if initial_navigation_added and has_error and not logs[1:] and logs and logs[0].get("status") == "failed":
+                for skipped in steps:
+                    logs.append({"id": str(uuid.uuid4()), "execution_id": execution_id,
+                        "step_number": len(logs) + 1, "action": skipped.get("action"),
+                        "target": skipped.get("target"), "value": "", "raw_command": "[BLOCKED]",
+                        "status": "skipped", "error_message": "Blocked because initial navigation failed",
+                        "duration_ms": 0, "screenshot_url": None,
+                        "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")})
             browser.close()
 
     except Exception as e:
-        logger.error(f"Global Playwright runner error in execution {execution_id}: {e}")
+        logger.error(f"Global Playwright runner error in execution {execution_id}: {redact(str(e))}")
         has_error = True
-        global_err_msg = str(e)
+        global_err_msg = redact(str(e))
 
     total_duration = int((time.time() - start_time) * 1000)
     if execution_id in CANCELLED_EXECUTIONS:
@@ -379,7 +401,7 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
     elif len(logs) < expected_step_count:
         final_status = "Failed"
         has_error = True
-        global_err_msg = (
+        global_err_msg = global_err_msg or (
             f"Execution produced {len(logs)} of {expected_step_count} expected step results. "
             "The test translation or execution plan is incomplete."
         )
@@ -396,7 +418,8 @@ def run_playwright_test(execution_id: str, app_url: str, steps: list, face_auth_
         "span_id": root_span_id, "parent_span_id": None, "service_name": "local-playwright-runner",
         "name": "test.execution", "status_code": "ERROR" if has_error else "OK", "duration_ms": total_duration,
         "attributes": {"type": "execution", "status": final_status}, "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ")})
-    _record_telemetry(execution_id, spans)
-    update_disk_execution_logs(execution_id, logs, status=final_status, error_message=global_err_msg, duration_ms=total_duration)
+    _record_telemetry(execution_id, redact(spans))
+    EXECUTION_LOGS_CACHE[execution_id] = redact(logs)
+    update_disk_execution_logs(execution_id, redact(logs), status=final_status, error_message=global_err_msg, duration_ms=total_duration)
     CANCELLED_EXECUTIONS.discard(execution_id)
     logger.info(f"Execution {execution_id} finished with status: {final_status} in {total_duration}ms")

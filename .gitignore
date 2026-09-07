@@ -6,6 +6,10 @@ __pycache__/
 *.pyc
 .qa_ai_platform/
 .build-venv/
+.test-venv/
+.test-browsers/
+.test-results/
+.desktop-preview/
 frontend/release/
 backend/playwright-browsers/
 backend/dist/
@@ -14,4 +18,5 @@ python-installer.exe
 /.smoke-data/
 /build/
 /*.spec
+!/qa-ai-engine.spec
 /officehub360_full_navigation_test.csv

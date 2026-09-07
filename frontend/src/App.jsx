@@ -10,10 +10,11 @@ import ForgotPassword from './pages/auth/ForgotPassword';
 import Dashboard from './pages/dashboard/Dashboard';
 import CreateProject from './pages/projects/CreateProject';
 import ProjectDetails from './pages/projects/ProjectDetails';
+import ProjectWorkspace from './pages/projects/ProjectWorkspace';
 import Profile from './pages/auth/Profile';
 import Home from './pages/Home';
 
-import { AuthenticationService, ProjectService, ExecutionService } from './services/api';
+import { AuthenticationService, ProjectService, ExecutionService, DesktopService } from './services/api';
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -41,7 +42,7 @@ export default function App() {
           const remembered = localStorage.getItem('qa_last_project_id');
           setSelectedProject(list.find(project => String(project.id) === remembered) || list[0]);
         }
-        Promise.all(list.map(project => ExecutionService.getExecutionHistory(project.id)))
+        Promise.all(list.map(project => project.project_type === 'desktop' ? DesktopService.history(project.id).catch(()=>[]) : ExecutionService.getExecutionHistory(project.id)))
           .then(groups => setExecutions(groups.flat()))
           .catch(() => setExecutions([]));
       });
@@ -177,7 +178,7 @@ export default function App() {
                 element={
                   <ProtectedRoute session={session}>
                     <div className="p-6">
-                      <ProjectDetails
+                      <ProjectWorkspace
                         projects={projects}
                         onSelectProject={project => {
                           setSelectedProject(project);

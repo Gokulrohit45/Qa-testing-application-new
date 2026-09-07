@@ -1,0 +1,2 @@
+# Optional pilot dependencies; not enabled in the released installer yet.
+pywinauto==0.6.9; sys_platform == 'win32'

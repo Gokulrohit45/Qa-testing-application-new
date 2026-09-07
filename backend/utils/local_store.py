@@ -37,17 +37,29 @@ def upsert(kind, record):
     record_id = str(record.get("id") or "")
     if not record_id:
         raise ValueError(f"{kind} record requires an id")
+    stored = record
+    if kind == 'desktop_test' and 'steps' in record:
+        from utils.desktop_protection import protect_steps
+        stored = {key: value for key, value in record.items() if key != 'steps'}
+        stored['protected_steps'] = protect_steps(record['steps'])
     with _LOCK, _connect() as connection:
         connection.execute("""INSERT INTO records(kind,id,user_id,project_id,payload,updated_at) VALUES(?,?,?,?,?,?)
             ON CONFLICT(kind,id) DO UPDATE SET user_id=excluded.user_id,
             project_id=excluded.project_id,payload=excluded.payload,updated_at=excluded.updated_at""",
-            (kind, record_id, record.get("user_id"), record.get("project_id"), json.dumps(record), datetime.now(timezone.utc).isoformat()))
+            (kind, record_id, record.get("user_id"), record.get("project_id"), json.dumps(stored), datetime.now(timezone.utc).isoformat()))
     return record
 
 def get(kind, record_id):
     with _connect() as connection:
         row = connection.execute("SELECT payload FROM records WHERE kind=? AND id=?", (kind, str(record_id))).fetchone()
-    return json.loads(row["payload"]) if row else None
+    return _decode(kind, row['payload']) if row else None
+
+def _decode(kind, payload):
+    record = json.loads(payload)
+    if kind == 'desktop_test' and 'protected_steps' in record:
+        from utils.desktop_protection import unprotect_steps
+        record['steps'] = unprotect_steps(record.pop('protected_steps'))
+    return record
 
 def list_records(kind, user_id=None, project_id=None):
     sql, values = "SELECT payload FROM records WHERE kind=?", [kind]
@@ -58,7 +70,7 @@ def list_records(kind, user_id=None, project_id=None):
     sql += " ORDER BY updated_at DESC"
     with _connect() as connection:
         rows = connection.execute(sql, values).fetchall()
-    return [json.loads(row["payload"]) for row in rows]
+    return [_decode(kind, row['payload']) for row in rows]
 
 def delete(kind, record_id):
     with _LOCK, _connect() as connection:

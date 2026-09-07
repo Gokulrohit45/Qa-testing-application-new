@@ -17,6 +17,7 @@ from core.playwright_runner import (
 from utils.logger import logger
 from utils.local_store import list_records, upsert, get
 from routes.translate_routes import fallback_heuristic_parser, normalize_steps
+from core.test_contract import validate_steps, resolve_variables, valid_url
 
 def _normalized_asset_name(value):
     from pathlib import Path
@@ -48,6 +49,10 @@ execution_bp = Blueprint("execution_bp", __name__)
 def trigger_execution():
     data = request.json or {}
     project_id = data.get("project_id")
+    project = get("project", project_id) if project_id else None
+    if data.get("project_type", "web") != "web" or (project and project.get("project_type", "web") != "web"):
+        return jsonify({"error": "Desktop execution is not available in this engine build.",
+                        "code": "UNSUPPORTED_RUNNER"}), 409
     user_id = data.get("user_id")
     app_url = data.get("app_url", "")
     steps = data.get("steps", [])
@@ -62,8 +67,7 @@ def trigger_execution():
 
     if not project_id or not app_url or not isinstance(steps, list) or not steps:
         return jsonify({"error": "project_id, app_url, and at least one test step are required"}), 400
-    parsed_url = urlparse(app_url)
-    if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+    if not isinstance(app_url, str) or not valid_url(app_url):
         return jsonify({"error": "app_url must be a valid HTTP or HTTPS URL"}), 400
     # Test cases can contain cached JSON produced by an older parser. Always
     # normalize again at execution time so legacy steps such as a CLICK whose
@@ -71,7 +75,7 @@ def trigger_execution():
     # and asset resolution.
     steps = normalize_steps([dict(step) if isinstance(step, dict) else step for step in steps])
     command_count = len([line for line in commands.splitlines() if line.strip()])
-    if commands and command_count > len(steps):
+    if commands and command_count > len(steps) and not data.get("structured"):
         reparsed_steps = normalize_steps(fallback_heuristic_parser(commands))
         if len(reparsed_steps) >= len(steps):
             logger.warning(
@@ -79,10 +83,19 @@ def trigger_execution():
                 len(steps), command_count
             )
             steps = reparsed_steps
-    allowed_actions = {"goto", "click", "fill", "wait", "verify", "verify_text", "upload_file"}
-    invalid_actions = [step.get("action") for step in steps if not isinstance(step, dict) or str(step.get("action", "")).lower() not in allowed_actions]
-    if invalid_actions:
-        return jsonify({"error": f"Unsupported test actions: {invalid_actions}"}), 400
+    try:
+        variables=data.get("variables", {})
+        if not isinstance(variables,dict): raise ValueError('Runtime variables must be an object')
+        if project:
+            from core.credential_vault import values
+            variables={**values(project_id,project.get('user_id')),**variables}
+        steps = resolve_variables(steps, variables)
+    except ValueError as error:
+        return jsonify({"error": str(error)}), 400
+    errors, warnings = validate_steps(steps)
+    if errors:
+        return jsonify({"error": " ".join(f"Step {e['step']}: {e['message']}" for e in errors),
+                        "errors": errors, "warnings": warnings}), 400
     try:
         steps = resolve_upload_assets(project_id, [dict(step) for step in steps])
     except ValueError as error:
@@ -92,14 +105,9 @@ def trigger_execution():
             parsed_target = urlparse(str(step.get("target", "")))
             if parsed_target.scheme not in {"http", "https"} or not parsed_target.netloc:
                 return jsonify({"error": "Every goto target must be a valid HTTP or HTTPS URL"}), 400
-    if steps and str(steps[0].get("action", "")).lower() == "goto" and str(steps[0].get("target", "")).rstrip('/') == app_url.rstrip('/'):
-        steps = steps[1:] or [{"action": "wait", "target": "", "value": "250", "raw_command": "Wait for initial page readiness"}]
-    engine_step_count = len(steps) + 1
-    try:
-        requested_step_count = max(0, int(data.get("expected_step_count") or 0))
-    except (TypeError, ValueError):
-        requested_step_count = 0
-    expected_step_count = max(engine_step_count, requested_step_count, command_count)
+    initial_navigation = not (steps[0]["action"] == "goto" and steps[0]["target"].rstrip('/') == app_url.rstrip('/'))
+    engine_step_count = len(steps) + int(initial_navigation)
+    expected_step_count = engine_step_count  # Validated execution plan is the source of truth.
     if not PLAYWRIGHT_AVAILABLE:
         return jsonify({"error": "The local Playwright runtime is not installed correctly"}), 503
 
@@ -162,7 +170,7 @@ def get_execution_logs(execution_id):
     telemetry_record = get("telemetry", execution_id) or {}
     return jsonify({
         "execution_id": execution_id,
-        "status": exec_meta.get("status", "Passed" if logs else "Unknown"),
+        "status": exec_meta.get("status", "Unknown"),
         "error_message": exec_meta.get("error_message"),
         "duration_ms": exec_meta.get("duration_ms", 0),
         "total_steps": exec_meta.get("expected_steps", len(logs)),

@@ -9,21 +9,26 @@ export default function CreateProject({ projects, setProjects }) {
   const [faceVideoFile, setFaceVideoFile]     = useState(null);
   const navigate = useNavigate();
   const [submitting, setSubmitting] = useState(false);
+  const [projectType, setProjectType] = useState('web');
+  const [error, setError] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSubmitting(true);
+    setError('');
+    try {
     const newProject = {
       name: form.name,
       app_name: form.appName || form.name,
-      app_url: form.appUrl.startsWith('http') ? form.appUrl : `https://${form.appUrl}`,
+      project_type: projectType,
+      app_url: projectType === 'desktop' ? null : form.appUrl.startsWith('http') ? form.appUrl : `https://${form.appUrl}`,
       description: form.description,
-      face_auth_enabled: faceAuthEnabled
+      face_auth_enabled: projectType === 'web' && faceAuthEnabled
     };
 
     const created = await setProjects(newProject);
 
-    if (created?.id && faceVideoFile) {
+    if (created?.id && faceVideoFile && projectType === 'web') {
       try {
         const uploaded = await AssetService.uploadVideo(faceVideoFile, created.id);
         await ProjectService.updateProject(created.id, { video_file_path: uploaded.y4m_path });
@@ -32,8 +37,9 @@ export default function CreateProject({ projects, setProjects }) {
       }
     }
 
-    setSubmitting(false);
-    navigate('/');
+    if (created?.id) navigate(`/projects/${created.id}`);
+    } catch (error) { setError(error.message); }
+    finally { setSubmitting(false); }
   };
 
   return (
@@ -45,11 +51,19 @@ export default function CreateProject({ projects, setProjects }) {
         </button>
         <div>
           <h1 className="text-xl font-black text-primary tracking-tight">Create New Project</h1>
-          <p className="text-secondary text-xs mt-0.5">Configure a new testing workspace for your web application.</p>
+          <p className="text-secondary text-xs mt-0.5">Configure a web or Windows desktop testing workspace.</p>
         </div>
       </div>
 
       <form onSubmit={handleSubmit} className="card p-6 space-y-5 shadow-sm">
+        <label className="block space-y-2">Application type
+          <select className="input-field" value={projectType} onChange={e => setProjectType(e.target.value)}>
+            <option value="web">Web application</option>
+            <option value="desktop">Windows desktop — local preview</option>
+          </select>
+        </label>
+        {projectType === 'desktop' && <p className="text-secondary text-sm">Local-only preview. Open your test application, then select its window in the project. Requires the opt-in desktop engine; cloud sync is not enabled yet.</p>}
+        {error && <p role="alert" className="text-red-600 dark:text-red-400">{error}</p>}
         <div className="space-y-1.5">
           <label className="section-label">Project Name</label>
           <div className="relative flex items-center">
@@ -65,14 +79,14 @@ export default function CreateProject({ projects, setProjects }) {
             <input type="text" value={form.appName} onChange={e => setForm({...form, appName:e.target.value})}
               placeholder="e.g. Acme Web Client" className="input-field" />
           </div>
-          <div className="space-y-1.5">
+          {projectType === 'web' && <div className="space-y-1.5">
             <label className="section-label">Target URL</label>
             <div className="relative flex items-center">
               <Link2 size={15} className="absolute left-3.5 text-muted pointer-events-none" />
               <input type="text" required value={form.appUrl} onChange={e => setForm({...form, appUrl:e.target.value})}
                 placeholder="https://example.com" className="input-field input-field-icon" />
             </div>
-          </div>
+          </div>}
         </div>
 
         <div className="space-y-1.5">
@@ -86,7 +100,7 @@ export default function CreateProject({ projects, setProjects }) {
         </div>
 
         {/* Authentication Configuration Section */}
-        <div className="p-4 rounded-xl border border-indigo-500/20 bg-slate-900 text-white space-y-3">
+        {projectType === 'web' && <div className="p-4 rounded-xl border border-indigo-500/20 bg-slate-900 text-white space-y-3">
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <p className="font-bold text-sm text-indigo-400 flex items-center gap-1.5">
@@ -129,6 +143,7 @@ export default function CreateProject({ projects, setProjects }) {
           )}
         </div>
 
+        }
         <div className="flex justify-end pt-2">
           <button type="submit" disabled={submitting} className="btn-primary px-6">
             <Zap size={15}/> {submitting ? 'Creating...' : 'Create Project'}

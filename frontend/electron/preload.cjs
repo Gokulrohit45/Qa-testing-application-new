@@ -1,6 +1,7 @@
 const { contextBridge } = require('electron');
 
 const portArg = process.argv.find(value => value.startsWith('--qa-ai-port='));
+const versionArg = process.argv.find(value => value.startsWith('--qa-ai-version='));
 const tokenArg = process.argv.find(value => value.startsWith('--qa-ai-token='));
 const supabaseUrlArg = process.argv.find(value => value.startsWith('--qa-ai-supabase-url='));
 const supabaseKeyArg = process.argv.find(value => value.startsWith('--qa-ai-supabase-anon-key='));
@@ -10,6 +11,7 @@ const token = tokenArg ? tokenArg.slice('--qa-ai-token='.length) : '';
 
 contextBridge.exposeInMainWorld('qaDesktop', Object.freeze({
   isDesktop: true,
+  appVersion: versionArg ? versionArg.slice('--qa-ai-version='.length) : '',
   localApiUrl: `http://127.0.0.1:${port}/api`,
   localApiToken: token,
   supabaseUrl: supabaseUrlArg ? supabaseUrlArg.slice('--qa-ai-supabase-url='.length) : '',

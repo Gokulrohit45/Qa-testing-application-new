@@ -5,52 +5,19 @@ const net = require('net');
 const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 let mainWindow;
 let backendProcess;
 let shuttingDown = false;
-const CLOUD_API_URL = 'https://qa-testing-application-new.onrender.com/api';
-
-function validPublicConfig(value) {
-  return Boolean(value && /^https:\/\//i.test(value.supabase_url || '') && typeof value.supabase_anon_key === 'string' && value.supabase_anon_key.length > 20);
+const testConfig = require('./test-environment.cjs').testEnvironment(process.env);
+const CLOUD_API_URL = testConfig?.cloudApiUrl || 'https://qa-testing-application-new.onrender.com/api';
+// The developer preview must not reuse the installed app's local database/session.
+if ((!app.isPackaged || app.getName() === 'QA-AI Platform Preview') && process.env.QA_AI_PREVIEW_DATA_DIR) {
+  app.setPath('userData', path.resolve(process.env.QA_AI_PREVIEW_DATA_DIR));
 }
 
-function downloadPublicConfig() {
-  return new Promise((resolve, reject) => {
-    const request = https.get(`${CLOUD_API_URL}/public-config`, { timeout: 15000 }, response => {
-      let body = '';
-      response.setEncoding('utf8');
-      response.on('data', chunk => { if (body.length < 100000) body += chunk; });
-      response.on('end', () => {
-        try {
-          const parsed = JSON.parse(body);
-          if (response.statusCode !== 200 || !validPublicConfig(parsed)) throw new Error('Cloud returned an invalid public configuration');
-          resolve(parsed);
-        } catch (error) { reject(error); }
-      });
-    });
-    request.on('timeout', () => request.destroy(new Error('Cloud configuration request timed out')));
-    request.on('error', reject);
-  });
-}
-
-async function getPublicConfig() {
-  const injected = {
-    supabase_url: process.env.QA_AI_SUPABASE_URL,
-    supabase_anon_key: process.env.QA_AI_SUPABASE_ANON_KEY
-  };
-  if (validPublicConfig(injected)) return injected;
-  const cachePath = path.join(app.getPath('userData'), 'public-cloud-config.json');
-  try {
-    const cached = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
-    if (validPublicConfig(cached)) return cached;
-  } catch (_error) {}
-  const downloaded = await downloadPublicConfig();
-  fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-  fs.writeFileSync(cachePath, JSON.stringify(downloaded), { encoding: 'utf8', mode: 0o600 });
-  return downloaded;
-}
+const {getPublicConfig, downloadPublicConfig} = require('./public-config.cjs');
 
 function reservePort() {
   return new Promise((resolve, reject) => {
@@ -72,8 +39,10 @@ function backendTarget() {
   }
   const script = path.join(__dirname, '..', '..', 'backend', 'app.py');
   const venvPython = path.join(path.dirname(script), 'venv', 'Scripts', 'python.exe');
+  const overridePython = process.env.QA_AI_PYTHON;
+  if (overridePython && !fs.existsSync(overridePython)) throw new Error('Configured preview Python was not found. Run the preview launcher checks.');
   return {
-    command: fs.existsSync(venvPython) ? venvPython : 'python',
+    command: overridePython || (fs.existsSync(venvPython) ? venvPython : 'python'),
     args: [script], cwd: path.dirname(script)
   };
 }
@@ -85,6 +54,7 @@ function startBackend(port, token) {
     const child = spawn(target.command, target.args, {
       cwd: target.cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, PORT: String(port), LOCAL_API_TOKEN: token, QA_AI_DESKTOP: '1', PYTHONUNBUFFERED: '1',
+        QA_AI_ENABLE_DESKTOP_RUNNER: process.env.QA_AI_ENABLE_DESKTOP_RUNNER || (app.isPackaged && app.getName() === 'QA-AI Platform Preview' ? '1' : '0'),
         QA_AI_DATA_DIR: path.join(app.getPath('userData'), 'engine-data'),
         PLAYWRIGHT_BROWSERS_PATH: app.isPackaged ? path.join(process.resourcesPath, 'playwright-browsers') : process.env.PLAYWRIGHT_BROWSERS_PATH }
     });
@@ -129,6 +99,7 @@ function createWindow(port, token, publicConfig) {
       preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false,
       contextIsolation: true, sandbox: true,
       additionalArguments: [
+        `--qa-ai-version=${app.getVersion()}`,
         `--qa-ai-port=${port}`, `--qa-ai-token=${token}`,
         `--qa-ai-supabase-url=${publicConfig.supabase_url}`,
         `--qa-ai-supabase-anon-key=${publicConfig.supabase_anon_key}`,
@@ -141,19 +112,20 @@ function createWindow(port, token, publicConfig) {
     if (/^https:\/\//i.test(url)) shell.openExternal(url);
     return { action: 'deny' };
   });
-  if (!app.isPackaged) mainWindow.loadURL('http://localhost:5173');
+  if (!app.isPackaged) mainWindow.loadURL(process.env.QA_AI_PREVIEW_DATA_DIR ? 'http://127.0.0.1:5173' : 'http://localhost:5173');
   else mainWindow.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
 }
 
 function stopBackendTree() {
   if (!backendProcess || backendProcess.killed) return;
   const pid = backendProcess.pid;
-  backendProcess.kill();
   if (process.platform === 'win32' && pid) {
-    const killer = spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
-      windowsHide: true, stdio: 'ignore'
+    // Terminate the tree before its root exits, or the frozen worker is orphaned.
+    spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], {
+      windowsHide: true, stdio: 'ignore', timeout: 10000
     });
-    killer.unref();
+  } else {
+    backendProcess.kill();
   }
   backendProcess = undefined;
 }
@@ -162,12 +134,16 @@ app.whenReady().then(async () => {
   try {
     const port = await reservePort();
     const token = crypto.randomBytes(32).toString('hex');
-    const publicConfig = await getPublicConfig();
+    const publicConfig = await getPublicConfig({
+      testConfig, cachePath: path.join(app.getPath('userData'), 'public-cloud-config.json'),
+      bundledPath: path.join(__dirname, 'public-config.json'),
+      download: () => downloadPublicConfig(CLOUD_API_URL)
+    });
     await startBackend(port, token);
     await waitForBackend(port, token);
     createWindow(port, token, publicConfig);
   } catch (error) {
-    dialog.showErrorBox('QA-AI could not start', `${error.message}\n\nPlease reinstall the application or contact support.`);
+    dialog.showErrorBox('QA-AI could not start', `${error.message}\n\nPlease check your connection and restart the application. Reinstalling is not required for a temporary connection problem.`);
     app.quit();
   }
 });

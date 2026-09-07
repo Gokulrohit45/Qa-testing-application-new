@@ -46,11 +46,14 @@
     }
   },
   "scripts": {
+    "test": "node --test src/lib/*.test.js",
+    "test:ui:server": "vite --config tests/vite.config.js --host 127.0.0.1 --port 5199",
     "dev": "vite",
     "build": "vite build",
     "build:web": "vite build",
     "preview": "vite preview",
     "electron:dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron:desktop-preview": "concurrently --kill-others \"vite --host 127.0.0.1 --port 5173 --strictPort\" \"wait-on --timeout 30000 http://127.0.0.1:5173 && electron .\"",
     "electron:build": "vite build --mode packaged && electron-builder --win"
   },
   "dependencies": {

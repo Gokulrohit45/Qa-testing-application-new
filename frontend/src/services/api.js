@@ -1,4 +1,6 @@
 import { supabase } from '../supabaseClient';
+import { requestJson } from '../lib/http';
+import { createDesktopCloud } from '../lib/desktop-cloud';
 
 // LOCAL Flask daemon (runs on user's desktop - handles execution, assets, test cases)
 const desktopConfig = window.qaDesktop || {};
@@ -10,36 +12,14 @@ const CLOUD_API_URL = desktopConfig.cloudApiUrl || import.meta.env.VITE_CLOUD_AP
 
 // Helper: call LOCAL Flask daemon (Playwright, uploads, test cases)
 async function fetchLocal(endpoint, options = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs || 30000);
-  const res = await fetch(`${LOCAL_FLASK_URL}${endpoint}`, {
-    headers: { 'Content-Type': 'application/json', ...(LOCAL_API_TOKEN ? { 'X-QA-AI-Token': LOCAL_API_TOKEN } : {}), ...options.headers },
-    ...options,
-    signal: options.signal || controller.signal,
+  return requestJson(`${LOCAL_FLASK_URL}${endpoint}`, options, {
+    'Content-Type': 'application/json', ...(LOCAL_API_TOKEN ? { 'X-QA-AI-Token': LOCAL_API_TOKEN } : {})
   });
-  clearTimeout(timer);
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`HTTP ${res.status}: ${errText}`);
-  }
-  return await res.json();
 }
 
 // Helper: call CLOUD API (Gemini, Brevo OTP)
 async function fetchCloud(endpoint, options = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), options.timeoutMs || 30000);
-  const res = await fetch(`${CLOUD_API_URL}${endpoint}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
-    ...options,
-    signal: options.signal || controller.signal,
-  });
-  clearTimeout(timer);
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(`HTTP ${res.status}: ${errText}`);
-  }
-  return await res.json();
+  return requestJson(`${CLOUD_API_URL}${endpoint}`, options, { 'Content-Type': 'application/json' });
 }
 
 // Normalized User Id extractor
@@ -53,6 +33,23 @@ function pickFields(value, fields) {
 }
 const PROJECT_CLOUD_FIELDS = ['id', 'user_id', 'name', 'app_name', 'app_url', 'description', 'face_auth_enabled', 'face_video_storage_path', 'created_at', 'updated_at'];
 const TESTCASE_CLOUD_FIELDS = ['id', 'project_id', 'user_id', 'name', 'type', 'commands', 'cached_json', 'status', 'created_at', 'updated_at'];
+
+async function localDesktopProject(projectId) {
+  const session = await AuthenticationService.getCurrentSession();
+  if (!session?.user?.id) throw new Error('Sign in before changing a project');
+  // Resolve the authoritative local type before deciding where a mutation goes.
+  // If the engine is unavailable, fail closed rather than accidentally syncing
+  // or deleting a local desktop project through the web-project path.
+  const projects = await fetchLocal(`/projects?user_id=${encodeURIComponent(session.user.id)}`);
+  return projects.find(p => p.id === projectId && p.project_type === 'desktop');
+}
+
+function cacheProject(record) {
+  try {
+    const current = JSON.parse(localStorage.getItem('qa_projects') || '[]');
+    localStorage.setItem('qa_projects', JSON.stringify([record, ...current.filter(p => p.id !== record.id)]));
+  } catch (_) { /* SQLite remains authoritative when the browser cache is full. */ }
+}
 
 // ─── AUTH SERVICE ──────────────────────────────────────────────────────────────
 export const AuthenticationService = {
@@ -147,12 +144,18 @@ export const ProjectService = {
       }
     } catch (e) {}
 
+    // Desktop workspaces have an owner-protected table separate from legacy web clients.
+    try {
+      const desktops=await DesktopCloudService.list();
+      for(const row of desktops) projectsMap.set(row.id,{...row.payload.project,user_id:userId,project_type:'desktop',cloud_connected:true,cloud_only:true,sync_state:'synced'});
+    } catch (_) { /* Existing local projects remain usable while cloud service is unavailable. */ }
+
     // 2. Local Flask daemon
     try {
       const localProjects = await fetchLocal(`/projects?user_id=${encodeURIComponent(userId)}`);
       if (Array.isArray(localProjects)) {
         for (const p of localProjects) {
-          if (p?.sync_state === 'pending') {
+          if (p?.sync_state === 'pending' && p.project_type !== 'desktop') {
             try {
               const { error } = await supabase.from('projects').upsert([pickFields(p, PROJECT_CLOUD_FIELDS)]);
               if (!error) {
@@ -163,7 +166,7 @@ export const ProjectService = {
           }
           if (p?.id) {
             const cloudProject = projectsMap.get(p.id);
-            projectsMap.set(p.id, cloudProject ? {
+            projectsMap.set(p.id, p.project_type === 'desktop' ? {...p,cloud_only:false,cloud_connected:Boolean(p.cloud_connected || cloudProject)} : cloudProject ? {
               ...cloudProject,
               ...(p.video_file_path ? { video_file_path: p.video_file_path } : {}),
               ...(p.sync_state ? { sync_state: p.sync_state } : {})
@@ -197,6 +200,12 @@ export const ProjectService = {
     if (!session?.user?.id) throw new Error('You must be signed in to create a project');
     const projId = projectData.id || crypto.randomUUID();
     const fullProject = { ...projectData, id: projId, user_id: userId, created_at: new Date().toISOString() };
+    if (projectData.project_type === 'desktop') {
+      // Cloud synchronization is not enabled merely because schema 002 exists.
+      const saved = await fetchLocal('/projects', { method: 'POST', body: JSON.stringify({ ...fullProject, sync_state: 'local_only' }) });
+      cacheProject(saved);
+      return saved;
+    }
 
     // 1. Save to Supabase Cloud DB
     try {
@@ -222,6 +231,12 @@ export const ProjectService = {
   },
 
   async updateProject(projectId, updates) {
+    const desktop=await localDesktopProject(projectId);
+    if (desktop) {
+      const saved = await fetchLocal(`/projects/${projectId}`, { method: 'PUT', body: JSON.stringify({ ...updates, sync_state: desktop.cloud_connected ? 'pending' : 'local_only' }) });
+      cacheProject(saved);
+      return saved;
+    }
     let syncError = null;
     const cloudUpdates = pickFields({ ...updates, updated_at: new Date().toISOString() }, PROJECT_CLOUD_FIELDS);
     try {
@@ -238,6 +253,14 @@ export const ProjectService = {
   },
 
   async deleteProject(projectId) {
+    const desktop=await localDesktopProject(projectId);
+    if (desktop) {
+      if(desktop.cloud_connected) await DesktopCloudService.remove(projectId);
+      await fetchLocal(`/projects/${projectId}`, { method: 'DELETE' });
+      const current = JSON.parse(localStorage.getItem('qa_projects') || '[]');
+      localStorage.setItem('qa_projects', JSON.stringify(current.filter(p => p.id !== projectId)));
+      return;
+    }
     const session = await AuthenticationService.getCurrentSession();
     if (session?.user?.id) {
       const folder = `${session.user.id}/${projectId}`;
@@ -257,19 +280,26 @@ export const ProjectService = {
   }
 };
 
+export const DesktopService = {
+  listSuites: id => fetchLocal(`/desktop/projects/${encodeURIComponent(id)}/suites`),
+  saveNamedSuite: (id, suiteId, name, test_ids, continue_on_failure) => fetchLocal(`/desktop/projects/${encodeURIComponent(id)}/suites${suiteId ? '/' + encodeURIComponent(suiteId) : ''}`, {method:suiteId ? 'PUT' : 'POST', body:JSON.stringify({name,test_ids,continue_on_failure})}),
+  deleteSuite: (id, suiteId) => fetchLocal(`/desktop/projects/${encodeURIComponent(id)}/suites/${encodeURIComponent(suiteId)}`, {method:'DELETE'}),
+  loadSuite: id => fetchLocal(`/desktop/projects/${encodeURIComponent(id)}/suite`),
+  saveSuite: (id, test_ids, continue_on_failure) => fetchLocal(`/desktop/projects/${encodeURIComponent(id)}/suite`, {method:'PUT', body:JSON.stringify({test_ids,continue_on_failure})}),
+  listTests: id => fetchLocal(`/desktop/projects/${encodeURIComponent(id)}/tests`),
+  saveNamedTest: (id, testId, name, steps) => fetchLocal(`/desktop/projects/${encodeURIComponent(id)}/tests${testId ? '/' + encodeURIComponent(testId) : ''}`, {method: testId ? 'PUT' : 'POST', body: JSON.stringify({name, steps})}),
+  loadTest: id => fetchLocal(`/desktop/projects/${encodeURIComponent(id)}/test`),
+  saveTest: (id, steps) => fetchLocal(`/desktop/projects/${encodeURIComponent(id)}/test`, { method: 'PUT', body: JSON.stringify({ steps }) }),
+  history: id => fetchLocal(`/desktop/projects/${encodeURIComponent(id)}/history`),
+  createJob: data => fetchLocal('/desktop/jobs', { method: 'POST', body: JSON.stringify(data) }),
+  getJob: id => fetchLocal(`/desktop/jobs/${id}`),
+  stop: id => fetchLocal(`/desktop/jobs/${id}/stop`, { method: 'POST' }),
+};
+
 // Helper: clean step targets (strip action prefixes like "verify_text ")
 function sanitizeSteps(steps) {
   if (!Array.isArray(steps)) return [];
-  return steps.map(s => {
-    let cleanTarget = strVal(s.target);
-    for (const prefix of ["verify_text ", "verify_text:", "verify ", "verify:", "assert ", "check "]) {
-      if (cleanTarget.toLowerCase().startsWith(prefix)) {
-        cleanTarget = cleanTarget.substring(prefix.length).trim();
-      }
-    }
-    cleanTarget = cleanTarget.replace(/^["']|["']$/g, '').trim();
-    return { ...s, target: cleanTarget };
-  });
+  return steps.map(s => s && typeof s === 'object' ? { ...s, target: strVal(s.target) } : s);
 }
 function strVal(v) { return v == null ? '' : String(v).trim(); }
 
@@ -324,6 +354,7 @@ export const TestCaseService = {
 
   async createTestCase(testCaseData) {
     const sanitizedJson = sanitizeSteps(testCaseData.cached_json);
+    await AIService.validateSteps(sanitizedJson);
     const session = await AuthenticationService.getCurrentSession();
     if (!session?.user?.id) throw new Error('You must be signed in to create a test case');
     const tcId = testCaseData.id || crypto.randomUUID();
@@ -351,6 +382,7 @@ export const TestCaseService = {
 
   async updateTestCase(id, testCaseData) {
     const sanitizedJson = sanitizeSteps(testCaseData.cached_json);
+    await AIService.validateSteps(sanitizedJson);
     const updatedTc = { ...testCaseData, cached_json: sanitizedJson };
 
     let syncError = null;
@@ -376,16 +408,24 @@ export const TestCaseService = {
   }
 };
 
-// ─── AI SERVICE (CLOUD — Gemini key lives on Render) ─────────────────────────
+// Local contract first; optional cloud AI never bypasses local validation.
 export const AIService = {
   async translatePrompt(prompt) {
+    // The versioned local contract is authoritative. A stale cloud parser must
+    // not silently replace it when a test needs clarification.
     try {
-      return await fetchCloud('/translate', { method: 'POST', body: JSON.stringify({ prompt }) });
-    } catch (e) {
-      // Fallback to local if cloud unavailable
       return await fetchLocal('/translate', { method: 'POST', body: JSON.stringify({ prompt }) });
+    } catch (error) {
+      if (!error.details?.needs_ai) throw error;
+      if (!window.confirm('Some instructions need clarification. Send this test text to the configured cloud AI for suggested steps? Avoid including real passwords; use test-data variables.')) throw error;
+      const candidate = await fetchCloud('/translate', { method: 'POST', body: JSON.stringify({ prompt }) });
+      if (candidate.contract_version !== 2) throw new Error('Cloud conversion uses an older contract. Update the cloud service before using AI suggestions, or use documented actions locally.');
+      return await fetchLocal('/validate-translation', { method: 'POST', body: JSON.stringify({ prompt, steps: candidate.steps }) });
     }
-  }
+  },
+  async validateSteps(steps) {
+    return await fetchLocal('/validate', { method: 'POST', body: JSON.stringify({ steps }) });
+  },
 };
 
 // ─── EXECUTION SERVICE (LOCAL — Playwright runs on desktop) ──────────────────
@@ -600,12 +640,40 @@ export function localAssetUrl(relativePath) {
 export const ApiClient = {
   async checkCloudHealth() {
     try {
-      const res = await fetch('https://qa-testing-application-new.onrender.com/api/health', {
+      const res = await fetch(`${CLOUD_API_URL}/health`, {
         signal: AbortSignal.timeout(5000)
       });
       return res.ok;
     } catch (e) {
       return false;
     }
+  }
+};
+
+export const DesktopCloudService = createDesktopCloud({local:fetchLocal,supabase,getSession:()=>AuthenticationService.getCurrentSession()});
+
+export const VaultService = {
+  async request(id, options, name) {
+    const session=await AuthenticationService.getCurrentSession();
+    if(!session?.user?.id) throw new Error('Sign in to manage test credentials');
+    return fetchLocal(`/projects/${encodeURIComponent(id)}/vault${name ? '/'+encodeURIComponent(name) : ''}?user_id=${encodeURIComponent(session.user.id)}`,options);
+  },
+  list(id){return this.request(id);},
+  save(id,name,value){return this.request(id,{method:'PUT',body:JSON.stringify({name,value})});},
+  remove(id,name){return this.request(id,{method:'DELETE'},name);}
+};
+
+export const RecordingService={
+  async start(project_id,url){const session=await AuthenticationService.getCurrentSession();if(!session?.user?.id)throw new Error('Sign in before recording');return fetchLocal('/recordings',{method:'POST',body:JSON.stringify({project_id,url,user_id:session.user.id,confirmed:true})});},
+  async request(id,stop=false){const session=await AuthenticationService.getCurrentSession();if(!session?.user?.id)throw new Error('Sign in to manage your recording');return fetchLocal(`/recordings/${encodeURIComponent(id)}${stop?'/stop':''}?user_id=${encodeURIComponent(session.user.id)}`,stop?{method:'POST'}:undefined);},
+  get(id){return this.request(id);},stop(id){return this.request(id,true);}
+};
+
+export const VideoDraftService={
+  async create(project,file){
+    const session=await AuthenticationService.getCurrentSession();if(!session?.access_token)throw new Error('Sign in before analyzing a recording');
+    if(file.size>20*1024*1024)throw new Error('Choose a test recording smaller than 20 MB');
+    const body=new FormData();body.append('video',file);body.append('consent','true');body.append('project_type',project.project_type||'web');body.append('url',project.app_url||'');
+    return requestJson(`${CLOUD_API_URL}/video-drafts`,{method:'POST',headers:{Authorization:`Bearer ${session.access_token}`},body,timeoutMs:110000});
   }
 };

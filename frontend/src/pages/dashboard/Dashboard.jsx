@@ -6,8 +6,8 @@ export default function Dashboard({ projects, executions, onDeleteProject }) {
   const [deleteModalProj, setDeleteModalProj] = useState(null);
 
   const totalRuns = executions.length;
-  const passed    = executions.filter(e => e.status === 'Passed').length;
-  const failed    = executions.filter(e => e.status === 'Failed').length;
+  const passed    = executions.filter(e => String(e.status).toLowerCase() === 'passed').length;
+  const failed    = executions.filter(e => String(e.status).toLowerCase() === 'failed').length;
 
   const confirmDelete = async () => {
     if (deleteModalProj && onDeleteProject) {
@@ -21,8 +21,8 @@ export default function Dashboard({ projects, executions, onDeleteProject }) {
       {/* Welcome */}
       <div className="flex justify-between items-start">
         <div>
-          <h1 className="text-2xl font-black text-primary tracking-tight">Good morning 👋</h1>
-          <p className="text-secondary text-sm mt-1">Here's an overview of your automation workspace.</p>
+          <h1 className="text-2xl font-black text-primary tracking-tight">Your testing command center</h1>
+          <p className="text-secondary text-sm mt-1">Turn repeatable checks into confidence. Build, run and review your web and desktop tests in one place.</p>
         </div>
         <Link to="/projects/create" className="btn-primary">
           <PlusCircle size={16}/> New Project
@@ -48,7 +48,7 @@ export default function Dashboard({ projects, executions, onDeleteProject }) {
         <div className="space-y-3">
           {projects.map(p => {
             const pRuns   = executions.filter(e => e.projectId === p.id || e.project_id === p.id);
-            const pPassed = pRuns.filter(e => e.status === 'Passed').length;
+            const pPassed = pRuns.filter(e => String(e.status).toLowerCase() === 'passed').length;
             const pRate   = pRuns.length > 0 ? Math.round((pPassed / pRuns.length) * 100) : 0;
             return (
               <div key={p.id} className="card card-hover p-5 flex items-center justify-between group">
@@ -58,7 +58,7 @@ export default function Dashboard({ projects, executions, onDeleteProject }) {
                   </div>
                   <div className="min-w-0">
                     <h3 className="font-semibold text-primary text-sm group-hover:text-indigo-600 dark:group-hover:text-indigo-400 transition-colors truncate">{p.name}</h3>
-                    <p className="text-[11px] text-muted font-mono truncate mt-0.5">{p.app_url || p.appUrl}</p>
+                    <p className="text-[11px] text-muted font-mono truncate mt-0.5">{p.project_type === 'desktop' ? 'Windows desktop automation' : p.app_url || p.appUrl}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-4 flex-shrink-0 ml-4">

@@ -1,4 +1,7 @@
 import os
+if __name__ == '__main__':
+    import multiprocessing
+    multiprocessing.freeze_support()
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from config import PORT, LOCAL_API_TOKEN, CORS_ALLOWED_ORIGINS
@@ -9,6 +12,10 @@ from routes.translate_routes import translate_bp
 from routes.execution_routes import execution_bp
 from routes.asset_routes import asset_bp
 from routes.auth_routes import auth_bp
+from routes.desktop_routes import desktop_bp
+from routes.vault_routes import vault_bp
+from routes.recording_routes import recording_bp
+from routes.video_draft_routes import video_draft_bp
 from utils.logger import logger
 
 def create_app():
@@ -16,7 +23,7 @@ def create_app():
     app.config["MAX_CONTENT_LENGTH"] = 250 * 1024 * 1024
     CORS(app, resources={r"/api/*": {
         "origins": CORS_ALLOWED_ORIGINS,
-        "allow_headers": ["Content-Type", "X-QA-AI-Token"]
+        "allow_headers": ["Content-Type", "X-QA-AI-Token", "Authorization"]
     }})
 
     @app.before_request
@@ -37,6 +44,10 @@ def create_app():
     app.register_blueprint(execution_bp)
     app.register_blueprint(asset_bp)
     app.register_blueprint(auth_bp)
+    app.register_blueprint(desktop_bp)
+    app.register_blueprint(vault_bp)
+    app.register_blueprint(recording_bp)
+    app.register_blueprint(video_draft_bp)
 
     logger.info(f"Flask backend initialized. Port: {PORT}")
     return app

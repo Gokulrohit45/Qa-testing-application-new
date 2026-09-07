@@ -1,4 +1,5 @@
 -r requirements.txt
+-r requirements-desktop.txt
 playwright==1.54.0
 imageio-ffmpeg==0.6.0
 pyinstaller==6.15.0

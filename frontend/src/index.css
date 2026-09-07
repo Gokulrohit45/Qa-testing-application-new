@@ -4,6 +4,15 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Desktop workspace: readable controls and keyboard focus in both themes. */
+.desktop-workspace button:disabled { opacity: .55; cursor: not-allowed; }
+.desktop-workspace button:focus-visible,
+.desktop-workspace summary:focus-visible { outline: 2px solid #818cf8; outline-offset: 4px; }
+.desktop-workspace summary { cursor: pointer; padding: .5rem 0; }
+.desktop-workspace .input-field::placeholder { color: #64748b; }
+.dark .desktop-workspace .input-field::placeholder { color: #a1a1aa; }
+.desktop-workspace .btn-primary + .btn-primary { margin-left: .5rem; }
+
 @layer base {
   * { box-sizing: border-box; }
   html { font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
@@ -166,3 +175,19 @@
     background: #ffffff !important; color: #0f172a !important;
   }
 }
+/* Version 2 workspace visual system */
+.workspace-hero{position:relative;overflow:hidden;border-radius:24px;color:#fff;background:radial-gradient(ellipse at 100% 0%,rgba(45,212,191,.24),transparent 52%),linear-gradient(125deg,#172554,#312e81 60%,#4c1d95);box-shadow:0 14px 38px rgba(30,41,59,.14)}
+.workspace-hero::after{content:"";position:absolute;width:210px;height:210px;border:1px solid rgba(255,255,255,.13);border-radius:50%;right:-55px;top:-80px;pointer-events:none}
+.workspace-hero h1{font-size:clamp(24px,3vw,34px);letter-spacing:-.035em;color:#fff}
+.workspace-hero .text-secondary{color:#dbeafe;max-width:780px;font-size:14px;line-height:1.7}
+.workspace-hero>p:first-child{color:#99f6e4;letter-spacing:.12em;font-size:11px;font-weight:700}
+.workspace-jumpbar{display:flex;gap:6px;flex-wrap:wrap;padding:6px;background:rgba(99,102,241,.07);border-radius:16px}
+.workspace-jumpbar button{display:flex;align-items:center;gap:8px;flex:1;justify-content:center;padding:11px 14px;border-radius:12px;font-size:12px;font-weight:650;white-space:nowrap;color:#475569}
+.workspace-jumpbar button:hover{background:#fff;color:#4338ca;box-shadow:0 3px 10px #33415512}
+.dark .workspace-jumpbar button{color:#cbd5e1}.dark .workspace-jumpbar button:hover{background:#242a40;color:#a5b4fc}
+.tool-icon{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;flex-shrink:0;border-radius:13px;background:rgba(99,102,241,.1);color:#6366f1}
+.desktop-workspace>section{scroll-margin-top:20px}.desktop-workspace .card{border:1px solid rgba(148,163,184,.12);border-radius:20px}
+.desktop-workspace .input-field{border:1px solid transparent;border-radius:12px;min-height:42px}.desktop-workspace .input-field:focus{border-color:#818cf8;box-shadow:0 0 0 3px #6366f119}
+.desktop-workspace>section h2{letter-spacing:-.025em}.desktop-workspace .btn-primary{border-radius:11px;min-height:40px}
+.workspace-tools details[open] summary{margin-bottom:16px}.workspace-tools .btn-ghost{display:inline-flex;gap:6px;align-items:center}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto!important}*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}

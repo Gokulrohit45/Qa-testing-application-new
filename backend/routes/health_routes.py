@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify
 from core.playwright_runner import PLAYWRIGHT_AVAILABLE
 from config import SUPABASE_URL, SUPABASE_ANON_KEY
+from core.desktop_jobs import available as desktop_available
 
 health_bp = Blueprint("health_bp", __name__)
 
@@ -10,7 +11,15 @@ def health_check():
         "status": "ok",
         "service": "qa-ai-platform-backend",
         "version": "2.1.0",
-        "playwright_available": PLAYWRIGHT_AVAILABLE
+        "playwright_available": PLAYWRIGHT_AVAILABLE,
+        "capabilities": {
+            "test_contract_versions": [2],
+            "project_types": ["web", "desktop"],
+            "execution_runners": ["web"] if PLAYWRIGHT_AVAILABLE else [],
+            "desktop_execution": desktop_available(),
+            "recording": False,
+            "video_to_test": False
+        }
     }), 200
 
 @health_bp.route("/api/public-config", methods=["GET"])

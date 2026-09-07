@@ -9,7 +9,7 @@ export default function Header({ selectedProject }) {
   const location = useLocation();
   const segments = location.pathname.split('/').filter(Boolean);
   const [currentUser, setCurrentUser] = useState(null);
-  const [cloudOnline, setCloudOnline] = useState(true);
+  const [cloudOnline, setCloudOnline] = useState(null);
 
   useEffect(() => {
     function getUserData() {
@@ -79,7 +79,7 @@ export default function Header({ selectedProject }) {
             : 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
         }`}>
           <span className={`w-2 h-2 rounded-full ${cloudOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-          {cloudOnline ? 'Cloud Sync Online' : 'Offline Mode (Local Engine Only)'}
+          {cloudOnline === null ? 'Checking cloud services' : cloudOnline ? 'Cloud services connected' : 'Cloud services unavailable'}
         </span>
 
         {/* Dark / Light toggle */}
