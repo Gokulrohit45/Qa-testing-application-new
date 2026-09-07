@@ -79,7 +79,7 @@ export default function Header({ selectedProject }) {
             : 'bg-amber-500/10 border-amber-500/30 text-amber-600 dark:text-amber-400'
         }`}>
           <span className={`w-2 h-2 rounded-full ${cloudOnline ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'}`} />
-          {cloudOnline === null ? 'Checking cloud services' : cloudOnline ? 'Cloud services connected' : 'Cloud services unavailable'}
+          {cloudOnline === null ? 'Checking cloud services' : cloudOnline ? 'Cloud backend online' : 'Cloud backend unavailable'}
         </span>
 
         {/* Dark / Light toggle */}

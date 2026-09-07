@@ -51,6 +51,21 @@ function cacheProject(record) {
   } catch (_) { /* SQLite remains authoritative when the browser cache is full. */ }
 }
 
+async function ensureLocalWebProject(projectId) {
+  const session = await AuthenticationService.getCurrentSession();
+  if (!session?.user?.id) throw new Error('Sign in before using project files');
+  const userId = session.user.id;
+  const local = await fetchLocal(`/projects?user_id=${encodeURIComponent(userId)}`);
+  const existing = Array.isArray(local) ? local.find(item => item.id === projectId) : null;
+  if (existing) return existing;
+  const { data, error } = await supabase.from('projects').select('*').eq('id', projectId).eq('user_id', userId).maybeSingle();
+  if (error) throw new Error(`Cloud project lookup failed: ${error.message}`);
+  if (!data) throw new Error('This project is not available for the signed-in account');
+  return fetchLocal('/projects', {
+    method: 'POST',
+    body: JSON.stringify({ ...pickFields(data, PROJECT_CLOUD_FIELDS), project_type: 'web', sync_state: 'synced' })
+  });
+}
 // ─── AUTH SERVICE ──────────────────────────────────────────────────────────────
 export const AuthenticationService = {
   async login(email, password) {
@@ -130,6 +145,7 @@ export const AuthenticationService = {
 
 // ─── PROJECT SERVICE ──────────────────────────────────────────────────────────
 export const ProjectService = {
+  ensureLocalProject: ensureLocalWebProject,
   async listProjects() {
     const projectsMap = new Map();
     const session = await AuthenticationService.getCurrentSession();
@@ -243,6 +259,7 @@ export const ProjectService = {
       const { error } = await supabase.from('projects').update(cloudUpdates).eq('id', projectId);
       if (error) throw error;
     } catch (e) { syncError = e; }
+    await ensureLocalWebProject(projectId);
     await fetchLocal(`/projects/${projectId}`, { method: 'PUT', body: JSON.stringify({ ...updates, sync_state: syncError ? 'pending' : 'synced' }) });
     try {
       const current = JSON.parse(localStorage.getItem('qa_projects') || '[]');
@@ -526,6 +543,7 @@ export const ExecutionService = {
 // ─── ASSET SERVICE (LOCAL — files live on desktop) ───────────────────────────
 export const AssetService = {
   async uploadVideo(file, projectId) {
+    if (projectId) await ensureLocalWebProject(projectId);
     const formData = new FormData();
     formData.append('video', file);
     if (projectId) formData.append('project_id', projectId);
@@ -562,6 +580,7 @@ export const AssetService = {
   },
 
   async uploadAssetLocal(file, projectId, assetId = '') {
+    if (projectId) await ensureLocalWebProject(projectId);
     const formData = new FormData();
     formData.append('asset', file);
     if (projectId) formData.append('project_id', projectId);

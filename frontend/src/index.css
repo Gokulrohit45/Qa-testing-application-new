@@ -191,3 +191,31 @@
 .desktop-workspace>section h2{letter-spacing:-.025em}.desktop-workspace .btn-primary{border-radius:11px;min-height:40px}
 .workspace-tools details[open] summary{margin-bottom:16px}.workspace-tools .btn-ghost{display:inline-flex;gap:6px;align-items:center}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto!important}*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+/* Unified project workspace polish */
+.web-workspace-header{box-shadow:0 18px 48px rgba(2,6,23,.16)}
+.web-workspace-header h1{letter-spacing:-.035em}
+.capture-workspace{border:1px solid rgba(99,102,241,.14);box-shadow:0 16px 44px rgba(15,23,42,.08)}
+.capture-switch{display:flex;gap:4px;padding:4px;border-radius:14px;background:rgba(99,102,241,.08)}
+.capture-switch button{display:flex;align-items:center;gap:7px;border-radius:11px;padding:9px 13px;font-size:12px;font-weight:700;color:#64748b}
+.capture-switch button.active{background:#fff;color:#4338ca;box-shadow:0 3px 12px rgba(15,23,42,.1)}
+.dark .capture-switch button{color:#a1a1aa}.dark .capture-switch button.active{background:#252a3d;color:#c7d2fe}
+.capture-panel{border-radius:18px;padding:20px;background:rgba(99,102,241,.035);border:1px solid rgba(99,102,241,.11)}
+.capture-dropzone{display:flex;min-height:120px;cursor:pointer;flex-direction:column;align-items:center;justify-content:center;gap:5px;border:1.5px dashed rgba(99,102,241,.4);border-radius:16px;color:#6366f1;background:rgba(99,102,241,.035);transition:.2s ease}
+.capture-dropzone:hover{border-color:#6366f1;background:rgba(99,102,241,.075)}
+.capture-dropzone span:last-of-type{font-size:11px;color:#64748b}.capture-dropzone input{position:absolute;width:1px;height:1px;opacity:0}
+.status-panel{padding:12px 14px;border-radius:13px;font-size:13px}.status-error{color:#dc2626;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.18)}
+.desktop-workspace .workspace-hero{min-height:auto;padding-right:190px}
+.desktop-workspace .workspace-hero .text-secondary{line-height:1.55}
+.desktop-workspace .workspace-tools .card{min-height:0}
+.desktop-workspace .workspace-tools details:not([open]){display:flex;align-items:center}
+.desktop-workspace .workspace-jumpbar{position:sticky;top:0;z-index:20;backdrop-filter:blur(16px);background:rgba(241,245,249,.88);border:1px solid rgba(148,163,184,.12)}
+.dark .desktop-workspace .workspace-jumpbar{background:rgba(17,19,28,.9)}
+.desktop-workspace>div[aria-label="Desktop overview"] .card{padding:13px 16px;background:transparent;border-color:rgba(99,102,241,.15)}
+.desktop-workspace>div[aria-label="Desktop overview"] p:last-child{font-size:20px}
+.desktop-workspace>p[aria-live="polite"]{border-left:3px solid #6366f1;padding:13px 16px}
+.desktop-workspace section[id^="desktop-"]{box-shadow:0 10px 34px rgba(15,23,42,.045)}
+.desktop-workspace section[id^="desktop-"]>p.text-secondary{max-width:900px;line-height:1.55}
+.desktop-workspace button:not(.btn-primary):not(.btn-ghost):not(:disabled){border-radius:10px;padding:8px 12px;background:rgba(99,102,241,.08);color:#6366f1;font-size:13px;font-weight:650}
+.dark .desktop-workspace button:not(.btn-primary):not(.btn-ghost):not(:disabled){color:#a5b4fc}
+@media(max-width:720px){.desktop-workspace .workspace-hero{padding-right:24px}.capture-switch{width:100%}.capture-switch button{flex:1;justify-content:center}}

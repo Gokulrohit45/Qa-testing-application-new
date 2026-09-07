@@ -645,7 +645,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
     <div className="space-y-6">
 
       {/* Project Header */}
-      <div className="relative overflow-hidden rounded-2xl border border-slate-200 dark:border-zinc-800 bg-gradient-to-br from-slate-900 to-slate-800 dark:from-zinc-900 dark:to-[#0c0c0e] p-7">
+      <div className="web-workspace-header relative overflow-hidden rounded-2xl border border-slate-200 dark:border-zinc-800 bg-gradient-to-br from-slate-900 to-slate-800 dark:from-zinc-900 dark:to-[#0c0c0e] p-6">
         <div className="absolute top-0 right-0 w-72 h-72 bg-indigo-600/15 rounded-full blur-[80px] pointer-events-none" />
         <div className="absolute bottom-0 right-20 w-40 h-40 bg-violet-600/10 rounded-full blur-[60px] pointer-events-none" />
         <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-5">
@@ -770,8 +770,8 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                     )}
                     {videoRestoreError && (
                       <div className="flex items-start justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-[11px] text-amber-300">
-                        <span>Cloud video restore failed: {videoRestoreError}</span>
-                        <button type="button" onClick={() => { setVideoRestoreError(''); setVideoPath(''); }} className="font-bold underline">Retry</button>
+                        <span>This video is saved in your cloud workspace but is not available on this computer yet. {videoRestoreError}</span>
+                        <button type="button" onClick={() => { setVideoRestoreError(''); setVideoPath(''); }} className="font-bold underline">Try again</button>
                       </div>
                     )}
                   </div>
@@ -1001,9 +1001,9 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
         {/* UPLOAD */}
         {activeTab === 'upload' && <DraftTools project={{...project,id,project_type:'web'}} disabled={executing} onDraft={steps=>{setUploadGroups([{name:'Captured workflow',steps}]);setUploadTcName('Captured workflow');setUploadCommands(describeSteps(steps));}}/>}
         {activeTab === 'upload' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-6xl">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-7xl mx-auto">
             <div className="lg:col-span-7 space-y-6">
-              <div className="card p-4 text-sm text-secondary">Use one scenario per test case. CSV: Test Case, Step, Action, Target, Value, Expected Type, Expected Value. Legacy Value/Exp remains supported. CSV wait values are seconds. Add explicit checks for business outcomes; a completed click alone is not proof of success. Hardware/MQTT/API actions are not supported. Store credentials as runtime variables such as {'{{test_password}}'} rather than in shared CSV files.</div>
+              <div className="import-guidance"><FileSpreadsheet size={18}/><div><strong>Import one scenario per test case</strong><p>Use the sample CSV for the supported columns. Add an expected outcome, and keep credentials in runtime variables such as {'{{test_password}}'}.</p></div></div>
               <form onSubmit={handleSaveUploadTc} className="card p-6 space-y-5">
                 <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800 pb-4">
                   <h3 className="text-base font-bold text-primary">Import &amp; Create Test Case</h3>
@@ -1109,7 +1109,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
 
         {/* RUN SUITE */}
         {activeTab === 'runsuite' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-6xl">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-7xl mx-auto">
             <div className="lg:col-span-6 space-y-6">
               <div className="card p-6 space-y-5">
                 <div className="space-y-1.5">

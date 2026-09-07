@@ -1,6 +1,8 @@
 {
   "name": "qa-ai-platform-v2-frontend",
   "private": true,
+  "description": "Professional web and Windows desktop test automation workspace.",
+  "author": "QA-AI Platform",
   "version": "1.0.6",
   "type": "module",
   "main": "electron/main.cjs",

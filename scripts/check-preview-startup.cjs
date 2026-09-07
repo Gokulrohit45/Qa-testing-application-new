@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
 const profile = fs.mkdtempSync(path.join(root, '.test-results/startup-profile-'));
 const executablePath = path.join(root, '.test-results/installer-v2/win-unpacked/QA-AI Platform Preview.exe');
+const expectedVersion = require(path.join(root, 'frontend/electron/preview-builder.cjs')).extraMetadata.version;
 (async () => {
   for (const mode of ['fresh', 'corrupt-cache']) {
     if (mode === 'corrupt-cache') fs.writeFileSync(path.join(profile, 'public-cloud-config.json'), '{broken');
@@ -24,14 +25,14 @@ const executablePath = path.join(root, '.test-results/installer-v2/win-unpacked/
       const all = JSON.parse(require('node:child_process').execFileSync('powershell.exe', ['-NoProfile','-Command','Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Json -Compress'], {encoding:'utf8',windowsHide:true}));
       for (let i=0; i<childPids.length; i++) for (const item of all) if(item.ParentProcessId===childPids[i] && !childPids.includes(item.ProcessId)) childPids.push(item.ProcessId);
       const info = await app.evaluate(({app}) => ({name:app.getName(),version:app.getVersion(),data:app.getPath('userData')}));
-      assert.equal(info.version, '2.0.0-rc.1');
+      assert.equal(info.version, expectedVersion);
       assert.equal(path.resolve(info.data), path.resolve(profile));
       if (mode === 'fresh') assert.ok(!fs.existsSync(path.join(profile, 'public-cloud-config.json')), 'Startup unexpectedly fetched cloud configuration');
       else assert.equal(fs.readFileSync(path.join(profile, 'public-cloud-config.json'),'utf8'),'{broken');
       const url = await page.evaluate(()=>window.qaDesktop.supabaseUrl);
       assert.ok(url.startsWith('https://') && !url.includes('placeholder'));
       await page.screenshot({path:path.join(root, `.test-results/recovery/startup-${mode}.png`)});
-      console.log(`Packaged Electron ${mode}: login visible offline, correct rc.1, isolated data, bundled configuration used.`);
+      console.log(`Packaged Electron ${mode}: login visible offline, correct ${expectedVersion}, isolated data, bundled configuration used.`);
     } finally {
       if (app) {
         let timer;

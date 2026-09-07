@@ -94,7 +94,7 @@ function waitForBackend(port, token, timeoutMs = 45000) {
 function createWindow(port, token, publicConfig) {
   mainWindow = new BrowserWindow({
     width: 1440, height: 900, minWidth: 1100, minHeight: 720,
-    title: 'QA-AI Autonomous Testing Platform', backgroundColor: '#0B0F17', show: false,
+    title: 'QA-AI Autonomous Testing Platform', icon: path.join(__dirname, 'assets', 'app-icon.ico'), backgroundColor: '#0B0F17', show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'), nodeIntegration: false,
       contextIsolation: true, sandbox: true,

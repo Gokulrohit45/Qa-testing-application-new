@@ -49,6 +49,15 @@ class ApiTests(unittest.TestCase):
         self.assertIn("playwright_available", response.get_json())
         self.assertFalse(response.get_json()["capabilities"]["desktop_execution"])
 
+    def test_health_reports_configured_video_capability(self):
+        from unittest.mock import patch
+        with patch('routes.health_routes.SUPABASE_URL', 'https://example.supabase.co'), \
+             patch('routes.health_routes.SUPABASE_ANON_KEY', 'public-anon'), \
+             patch('routes.health_routes.GEMINI_API_KEY', 'configured'), \
+             patch.dict('os.environ', {'GEMINI_MODEL': 'gemini-2.5-flash'}):
+            response = self.client.get('/api/health', headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.get_json()['capabilities']['video_to_test'])
     def test_desktop_metadata_cannot_execute_as_web(self):
         response = self.client.post("/api/projects", headers=self.headers, json={
             "name": "Desktop pilot", "user_id": "desktop-test-user", "project_type": "desktop"

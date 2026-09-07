@@ -78,6 +78,7 @@ class FrontendIntegrationTests(unittest.TestCase):
         expect(self.page.get_by_text('0% Rate', exact=True)).to_be_visible()
 
     def test_video_requires_consent_and_only_creates_review_draft(self):
+        self.page.get_by_role('tab',name='Video draft',exact=True).click()
         button=self.page.get_by_role('button',name='Generate draft',exact=True)
         expect(button).to_be_disabled()
         self.page.get_by_label('Test recording video').set_input_files({'name':'synthetic.webm','mimeType':'video/webm','buffer':b'fixture'})

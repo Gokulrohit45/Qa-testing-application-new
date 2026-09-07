@@ -15,12 +15,12 @@ module.exports = {
   ...base,
   appId: 'com.qa.ai.platform.preview',
   productName: 'QA-AI Platform Preview',
-  extraMetadata: { name: 'qa-ai-platform-preview', productName: 'QA-AI Platform Preview', version: '2.0.0-rc.1' },
+  extraMetadata: { name: 'qa-ai-platform-preview', productName: 'QA-AI Platform Preview', version: '2.0.0-rc.2' },
   directories: { output: path.join(root, '.test-results/installer-v2') },
   extraResources: [
     { from: path.join(root, '.test-results/frozen-v2/qa-ai-engine.exe'), to: 'python_engine/qa-ai-engine.exe' },
     { from: path.join(root, '.test-browsers'), to: 'playwright-browsers', filter: ['**/*'] }
   ],
-  win: { ...base.win, target: ['nsis'], artifactName: 'QA-AI-Platform-Preview-${version}-${arch}.${ext}' },
+  win: { ...base.win, icon: path.join(__dirname, 'assets/app-icon.ico'), target: ['nsis'], artifactName: 'QA-AI-Platform-Preview-${version}-${arch}.${ext}' },
   publish: null
 };

@@ -108,8 +108,8 @@ export default function DesktopWorkspace({ project, onSelectProject }) {
     finally { if (mounted.current) setBusy(false); }
   }
   function update(index, change) { replaceSteps(steps.map((s, i) => i === index ? { ...s, ...change } : s)); }
-  return <div className="desktop-workspace max-w-6xl mx-auto space-y-6 text-primary" aria-busy={busy || loading}>
-    <header className="workspace-hero p-7 space-y-3">
+  return <div className="desktop-workspace max-w-7xl mx-auto space-y-5 text-primary" aria-busy={busy || loading}>
+    <header className="workspace-hero p-6 space-y-2">
       <p className="text-secondary text-sm">DESKTOP AUTOMATION · VERSION 2</p>
       <h1 className="text-2xl font-bold">{project.name}</h1>
       <p className="text-secondary">Build reliable desktop tests. Organize suites, protect test credentials, and keep your work connected across devices. Every run stays on the computer you authorize.</p>
