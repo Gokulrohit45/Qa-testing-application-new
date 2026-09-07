@@ -3,7 +3,7 @@ BEGIN;
 SET LOCAL lock_timeout = '5s';
 CREATE TABLE IF NOT EXISTS public.desktop_workspaces (
   id uuid PRIMARY KEY,
-  user_id uuid NOT NULL REFERENCES auth.users(id),
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   revision integer NOT NULL CHECK (revision > 0),
   payload jsonb NOT NULL CHECK (jsonb_typeof(payload) = 'object' AND octet_length(payload::text) <= 2097152),
   deleted boolean NOT NULL DEFAULT false,
@@ -21,7 +21,7 @@ GRANT SELECT ON public.desktop_workspaces TO authenticated;
 REVOKE ALL ON public.desktop_workspaces FROM anon;
 CREATE TABLE IF NOT EXISTS public.desktop_workspace_versions (
   workspace_id uuid NOT NULL REFERENCES public.desktop_workspaces(id),
-  user_id uuid NOT NULL REFERENCES auth.users(id),
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   revision integer NOT NULL,
   payload jsonb NOT NULL,
   deleted boolean NOT NULL,

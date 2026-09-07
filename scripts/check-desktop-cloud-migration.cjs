@@ -11,6 +11,8 @@ const {PGlite}=require(path.resolve('.test-results/sql-runtime/node_modules/@ele
  INSERT INTO auth.users VALUES ('00000000-0000-0000-0000-000000000001'),('00000000-0000-0000-0000-000000000002');`);
  const sql=fs.readFileSync('migrations/003_desktop_cloud_workspaces.sql','utf8');
  await db.exec(sql);await db.exec(sql);
+ await db.exec(fs.readFileSync('migrations/004_desktop_workspace_user_cleanup.sql','utf8'));
+ await db.exec(fs.readFileSync('migrations/004_desktop_workspace_user_cleanup.sql','utf8'));
  const id='11111111-1111-1111-1111-111111111111';
  const payload={schema_version:1,project:{id,project_type:'desktop',name:'Synthetic fixture'},tests:[],suites:[],runs:[]};
  await db.exec(`SET ROLE authenticated; SET request.jwt.claim.sub='00000000-0000-0000-0000-000000000001'`);
@@ -29,5 +31,8 @@ const {PGlite}=require(path.resolve('.test-results/sql-runtime/node_modules/@ele
  await assert.rejects(save(0),e=>e.code==='42501');
  await db.exec('RESET ROLE; SET ROLE anon');
  await assert.rejects(save(0),e=>e.code==='42501');
- await db.close();console.log('PASS: migration repeatability, revision CAS, immutable history, owner isolation, anonymous denial');
+ await db.exec("RESET ROLE; DELETE FROM auth.users WHERE id='00000000-0000-0000-0000-000000000001'");
+ assert.equal((await db.query('SELECT * FROM desktop_workspaces')).rows.length,0);
+ assert.equal((await db.query('SELECT * FROM desktop_workspace_versions')).rows.length,0);
+ await db.close();console.log('PASS: migration repeatability, revision CAS, immutable history, owner isolation, anonymous denial, account cascade');
 })().catch(e=>{console.error(e);process.exitCode=1});
