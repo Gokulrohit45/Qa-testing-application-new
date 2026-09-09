@@ -3,12 +3,12 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from utils import local_store
 from core import credential_vault as vault
 from core.web_recorder import clean_event, SCRIPT
-from routes.video_draft_routes import validate_draft
+from routes.video_draft_routes import analyze_video, validate_draft
 
 class VaultTests(unittest.TestCase):
     def setUp(self):
@@ -55,6 +55,22 @@ class DraftTests(unittest.TestCase):
     def test_ai_draft_rejects_invalid_actions(self):
         with self.assertRaises(ValueError):validate_draft({'steps':[{'action':'shell','target':{'name':'x'}}]},'desktop')
 
+    def test_large_video_uses_provider_file_and_deletes_it(self):
+        start=Mock(status_code=200,headers={'X-Goog-Upload-URL':'https://upload.invalid/session'})
+        uploaded=Mock(status_code=200);uploaded.json.return_value={'file':{'name':'files/fixture','uri':'https://files.invalid/fixture','state':'ACTIVE'}}
+        generated=Mock(status_code=200);generated.json.return_value={'candidates':[{'content':{'parts':[{'text':json.dumps({'steps':[{'action':'click','target':{'name':'Save','control_type':'Button'},'value':''}]})}]}}]}
+        with patch('routes.video_draft_routes.INLINE_VIDEO_BYTES',1), patch('routes.video_draft_routes.GEMINI_API_KEY','fixture-key'), patch('routes.video_draft_routes.requests.post',side_effect=[start,uploaded,generated]) as post, patch('routes.video_draft_routes.requests.delete') as delete:
+            result=analyze_video(b'large-fixture','video/mp4','desktop','', 'gemini-fixture')
+        self.assertTrue(result['requires_review'])
+        self.assertIn('fileData',post.call_args_list[2].kwargs['json']['contents'][0]['parts'][1])
+        delete.assert_called_once()
+
+    def test_small_video_remains_inline(self):
+        generated=Mock(status_code=200);generated.json.return_value={'candidates':[{'content':{'parts':[{'text':json.dumps({'steps':[{'action':'click','target':{'name':'Save','control_type':'Button'},'value':''}]})}]}}]}
+        with patch('routes.video_draft_routes.GEMINI_API_KEY','fixture-key'), patch('routes.video_draft_routes.requests.post',return_value=generated) as post, patch('routes.video_draft_routes.requests.delete') as delete:
+            analyze_video(b'small','video/mp4','desktop','', 'gemini-fixture')
+        self.assertIn('inlineData',post.call_args.kwargs['json']['contents'][0]['parts'][1])
+        delete.assert_not_called()
 class RecorderBrowserTests(unittest.TestCase):
     def test_real_browser_records_inputs_without_password_values(self):
         from playwright.sync_api import sync_playwright

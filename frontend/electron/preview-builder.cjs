@@ -15,7 +15,7 @@ module.exports = {
   ...base,
   appId: 'com.qa.ai.platform.preview',
   productName: 'QA-AI Platform Preview',
-  extraMetadata: { name: 'qa-ai-platform-preview', productName: 'QA-AI Platform Preview', version: '2.0.0-rc.2' },
+  extraMetadata: { name: 'qa-ai-platform-preview', productName: 'QA-AI Platform Preview', version: '2.0.0-rc.3' },
   directories: { output: path.join(root, '.test-results/installer-v2') },
   extraResources: [
     { from: path.join(root, '.test-results/frozen-v2/qa-ai-engine.exe'), to: 'python_engine/qa-ai-engine.exe' },

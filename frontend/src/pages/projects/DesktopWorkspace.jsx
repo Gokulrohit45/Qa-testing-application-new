@@ -2,222 +2,75 @@ import DraftTools from '../../components/DraftTools';
 import React, { useEffect, useRef, useState } from 'react';
 import { DesktopService } from '../../services/api';
 import WorkspaceTools from '../../components/WorkspaceTools';
-import { Cloud, Monitor, Layers3, ListChecks, Play, History, Sparkles } from 'lucide-react';
+import { Monitor, Play, History, FileText, Upload, ShieldCheck, Activity, CheckCircle2, Clock, Download, Layers3 } from 'lucide-react';
 import { downloadDesktopReport } from '../../lib/desktop-report';
 
+const TABS=[
+  {id:'overview',label:'Overview'},
+  {id:'testcases',label:'Test Cases'},
+  {id:'assets',label:'Project Assets'},
+  {id:'upload',label:'Upload'},
+  {id:'runsuite',label:'Run Suite'},
+  {id:'history',label:'History'},
+  {id:'results',label:'Results'},
+  {id:'report',label:'Report'},
+];
+
 export default function DesktopWorkspace({ project, onSelectProject }) {
+  const [activeTab,setActiveTab]=useState('overview');
   const [syncRevision,setSyncRevision]=useState(0);
-  const [windows, setWindows] = useState([]);
-  const [selected, setSelected] = useState('');
-  const [inspected,setInspected]=useState(false);
-  const [controls, setControls] = useState([]);
-  const [steps, setSteps] = useState([]);
-  const [confirmed, setConfirmed] = useState(false);
-  const [job, setJob] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
-  const [operationKind, setOperationKind] = useState('');
-  const [history, setHistory] = useState([]);
-  const [savedMessage, setSavedMessage] = useState('');
-  const [historyFilter, setHistoryFilter] = useState('all');
-  const [loading, setLoading] = useState(true);
-  const [tests, setTests] = useState([]);
-  const [testId, setTestId] = useState('');
-  const [testName, setTestName] = useState('New desktop test');
-  const [dirty, setDirty] = useState(false);
-  const [suiteIds, setSuiteIds] = useState([]);
-  const [continueOnFailure, setContinueOnFailure] = useState(false);
-  const [suiteMessage, setSuiteMessage] = useState('');
-  const [suites, setSuites] = useState([]);
-  const [suiteId, setSuiteId] = useState('');
-  const [suiteName, setSuiteName] = useState('New desktop suite');
-  const storedSuite = suites.find(s => s.id === suiteId);
-  const suiteDirty = !storedSuite || suiteName !== (storedSuite.name || 'New desktop suite') || JSON.stringify(suiteIds) !== JSON.stringify(storedSuite.test_ids) || continueOnFailure !== Boolean(storedSuite.continue_on_failure);
-  function switchSuite(id) {
-    if (suiteDirty && (suiteId || suiteIds.length || suiteName !== 'New desktop suite' || continueOnFailure) && !globalThis.confirm('Discard unsaved suite changes?')) return;
-    chooseSuite(suites.find(s => s.id === id));
-  }
-  async function saveSuite() {
-    setBusy(true); setError('');
-    try {
-      const saved = await DesktopService.saveNamedSuite(project.id, suiteId, suiteName, suiteIds, continueOnFailure);
-      setSuites(old => [saved, ...old.filter(s => s.id !== saved.id)]);
-      setSuiteId(saved.id); setSuiteName(saved.name);
-      setSuiteMessage('Named suite order and failure policy saved locally.'); setSyncRevision(n=>n+1);
-    }
-    catch(e) { setError(e.message); }
-    finally { setBusy(false); }
-  }
-  function chooseSuite(suite) {
-    setSuiteId(suite?.id || ''); setSuiteName(suite?.name || 'New desktop suite');
-    setSuiteIds(suite?.test_ids || []); setContinueOnFailure(Boolean(suite?.continue_on_failure));
-    setConfirmed(false); setSuiteMessage('');
-  }
-  function chooseTest(test) {
-    setTestId(test?.id || ''); setTestName(test?.name || 'New desktop test');
-    setSteps(test?.steps || []); setDirty(false); setConfirmed(false); setJob(null); setSavedMessage('');
-  }
-  function switchTest(id) {
-    if (dirty && !globalThis.confirm('Discard unsaved test changes?')) return;
-    chooseTest(tests.find(t => t.id === id));
-  }
-  const displayDate = value => value ? new Date(value).toLocaleString() : 'Time unavailable';
-  const mounted = useRef(true);
-  useEffect(() => { mounted.current = true; onSelectProject(project); return () => { mounted.current = false; }; }, []);
-  useEffect(() => {
-    Promise.all([DesktopService.listTests(project.id), DesktopService.history(project.id), DesktopService.listSuites(project.id)])
-      .then(([saved, runs, storedSuites]) => { if (mounted.current) { setTests(saved); chooseTest(saved[0]); setHistory(runs); setSuites(storedSuites); chooseSuite(storedSuites[0]); } })
-      .catch(e => { if (mounted.current) setError(e.message); })
-      .finally(() => { if (mounted.current) setLoading(false); });
-  }, [project.id]);
-  async function save() {
-    setBusy(true); setError('');
-    try {
-      const saved = await DesktopService.saveNamedTest(project.id, testId, testName, steps);
-      setTests(old => [saved, ...old.filter(t => t.id !== saved.id)]); setTestId(saved.id); setDirty(false);
-      setSavedMessage('Test saved on this computer.'); setSyncRevision(n=>n+1);
-    }
-    catch (e) { setError(e.message); }
-    finally { setBusy(false); }
-  }
-  const window = windows.find(w => String(w.handle) === selected);
-  const readyTargets = inspected && steps.length > 0 && steps.every(s => s.target && Object.keys(s.target).length && Object.values(s.target).every(v=>typeof v==='string'&&v.trim()));
-  const readiness = !window ? 'Select a running application to begin.' : !controls.length ? 'Inspect the selected window to identify its controls.' : !steps.length ? 'Add an action and an assertion to build your test.' : !readyTargets ? 'Reselect saved targets that are missing from this inspection.' : !confirmed ? 'Review the steps and authorize interaction before running.' : 'Ready to run against the selected window.';
-  function replaceSteps(next) { setSteps(next); setDirty(true); setConfirmed(false); setSavedMessage('Unsaved changes'); }
-  async function operate(kind, suite = false) {
-    setBusy(true); setError(''); setJob(null); setOperationKind(kind);
-    try {
-      const { id } = await DesktopService.createJob({ kind, ...window, steps, confirmed, project_id: project.id, test_id: kind === 'run' ? testId || undefined : undefined,
-        ...(suite ? {suite_id: suiteId} : {}) });
-      if (!mounted.current) return;
-      setJob({ id, status: 'running', steps: [] });
-      let result;
-      do {
-        await new Promise(resolve => setTimeout(resolve, 400));
-        if (!mounted.current) return;
-        result = await DesktopService.getJob(id);
-        if (!mounted.current) return;
-        setJob(result);
-      } while (['running', 'stopping'].includes(result.status));
-      if (result.status === 'passed') {
-        if (kind === 'windows') { setWindows(result.windows); setSelected(''); setControls([]);setInspected(false); setConfirmed(false); }
-        if (kind === 'controls') {setControls(result.controls);setInspected(true);}
-      } else if (result.error) setError(result.error);
-      if (kind === 'run') {setHistory(await DesktopService.history(project.id));setSyncRevision(n=>n+1);}
-    } catch (e) { if (mounted.current) setError(e.message); }
-    finally { if (mounted.current) setBusy(false); }
-  }
-  function update(index, change) { replaceSteps(steps.map((s, i) => i === index ? { ...s, ...change } : s)); }
-  return <div className="desktop-workspace max-w-7xl mx-auto space-y-5 text-primary" aria-busy={busy || loading}>
-    <header className="workspace-hero p-6 space-y-2">
-      <p className="text-secondary text-sm">DESKTOP AUTOMATION · VERSION 2</p>
-      <h1 className="text-2xl font-bold">{project.name}</h1>
-      <p className="text-secondary">Build reliable desktop tests. Organize suites, protect test credentials, and keep your work connected across devices. Every run stays on the computer you authorize.</p>
-    </header>
-    <WorkspaceTools project={project} disabled={busy||loading||dirty||Boolean(suiteId&&suiteDirty)} revision={syncRevision} onRestored={async()=>{const [saved,runs,stored]=await Promise.all([DesktopService.listTests(project.id),DesktopService.history(project.id),DesktopService.listSuites(project.id)]);setTests(saved);chooseTest(saved[0]);setHistory(runs);setSuites(stored);chooseSuite(stored[0]);}}/>
-    <nav className="workspace-jumpbar" aria-label="Workspace sections">{[['library','Test library',Layers3],['application','Application',Monitor],['steps','Test builder',ListChecks],['run','Run & review',Play],['history','History',History]].map(([id,label,Icon])=><button key={id} onClick={()=>document.getElementById(`desktop-${id}`)?.scrollIntoView({behavior:'smooth',block:'start'})}><Icon size={16}/>{label}</button>)}</nav>
-    <section id="desktop-library" className="card p-6 space-y-4">
-      <h2 className="text-lg font-bold">Test library</h2>
-      <select aria-label="Saved desktop test" className="input-field" disabled={busy || loading} value={testId} onChange={e => switchTest(e.target.value)}>
-        <option value="">New unsaved test</option>
-        {tests.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-      </select>
-      <label>Test name<input aria-label="Test name" className="input-field" maxLength={120} value={testName} disabled={busy || loading} onChange={e => { setTestName(e.target.value); setDirty(true); setConfirmed(false); }}/></label>
-      <button className="btn-primary" disabled={busy || loading} onClick={() => switchTest('')}>New test</button>
-      <p className="text-secondary">Each named test is saved separately. Switching tests resets authorization. Existing test history stays intact.</p>
-      <h3 className="font-bold">Run saved tests as a suite</h3>
-      <p className="text-secondary">Select in execution order (maximum 20 tests / 100 total steps). Each test must include its own setup. The application is not reset between tests. Only saved steps are used.</p>
-      <select aria-label="Saved desktop suite" className="input-field" disabled={busy || loading} value={suiteId} onChange={e => switchSuite(e.target.value)}>
-        <option value="">New unsaved suite</option>
-        {suites.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-      </select>
-      <label>Suite name<input aria-label="Suite name" className="input-field" maxLength={120} disabled={busy || loading} value={suiteName} onChange={e => { setSuiteName(e.target.value); setConfirmed(false); }}/></label>
-      <button disabled={busy || loading} onClick={() => switchSuite('')}>New suite</button>
-      {tests.map(t => <label key={t.id} className="flex gap-3"><input type="checkbox" aria-label={`Include ${t.name} in suite`} disabled={busy || loading} checked={suiteIds.includes(t.id)} onChange={e => {setSuiteIds(old => e.target.checked ? [...old, t.id] : old.filter(id => id !== t.id)); setConfirmed(false); }}/>{t.name}{suiteIds.includes(t.id) ? ` · order ${suiteIds.indexOf(t.id)+1}` : ''}</label>)}
-      <label className="flex gap-3"><input type="checkbox" aria-label="Continue suite after failure" disabled={busy} checked={continueOnFailure} onChange={e => {setContinueOnFailure(e.target.checked); setConfirmed(false); }}/>Continue after failed tests (later tests must be independent)</label>
-      <button className="btn-primary" disabled={busy || loading || !suiteIds.length} onClick={saveSuite}>Save suite locally</button>
-      <p className="text-secondary">{suiteMessage}</p>
-    </section>
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4" aria-label="Desktop overview">
-      {[['Test steps', steps.length], ['Inspected controls', controls.length], ['Saved runs', history.length], ['Passed runs', history.filter(r => r.status === 'passed').length]].map(([label, value]) => <div key={label} className="card p-4"><p className="text-secondary text-sm">{label}</p><p className="text-2xl font-bold mt-1">{value}</p></div>)}
-    </div>
-    <p className="card p-4 text-secondary" aria-live="polite">{loading ? 'Loading saved test and history…' : readiness}</p>
-    {error && <p role="alert" className="card p-4 text-red-600 dark:text-red-400 break-words">{error}</p>}
-    <section id="desktop-application" className="card p-6 space-y-4">
-      <h2 className="text-lg font-bold">1. Select application</h2>
-      <p className="text-secondary text-sm">Open a disposable test document first. Window discovery reads visible window titles. Do not select an application with important unsaved data.</p>
-      <button className="btn-primary" disabled={busy || loading} onClick={() => operate('windows')}>Refresh running windows</button>
-      <select aria-label="Application window" className="input-field" disabled={busy} value={selected} onChange={e => { setSelected(e.target.value); setControls([]);setInspected(false); setConfirmed(false); }}>
-        <option value="">Select a window</option>
-        {windows.map(w => <option key={w.handle} value={w.handle}>{w.title} · PID {w.process_id}</option>)}
-      </select>
-      <button className="btn-primary" disabled={busy || !window} onClick={() => operate('controls')}>Inspect selected window</button>
-    </section>
-    <DraftTools project={project} disabled={busy||loading} onDraft={draft=>{if(dirty&&!globalThis.confirm('Replace the unsaved test draft?'))return;chooseTest(null);replaceSteps(draft);document.getElementById('desktop-steps')?.scrollIntoView({behavior:'smooth'});}}/>
-    <section id="desktop-steps" className="card p-6 space-y-4">
-      <h2 className="text-lg font-bold">2. Build test steps</h2>
-      <p className="text-secondary text-sm">Fill replaces contents. Verification checks exact text. Saving protects steps with your Windows account. Older plaintext tests are protected when saved again; old backups may still contain plaintext. Use test data, not production credentials. Save updates only the selected test.</p>
-      {steps.map((step, i) => <div key={i} className="grid grid-cols-1 md:grid-cols-4 gap-3 items-center">
-        <label>Step {i + 1}<select aria-label={`Step ${i + 1} action`} disabled={busy} className="input-field" value={step.action} onChange={e => update(i, { action: e.target.value })}>
-          <option value="click">Click</option><option value="fill">Fill text</option><option value="verify_text">Verify exact text</option>
-          <option value="verify_visible">Verify visible</option><option value="verify_enabled">Verify enabled</option><option value="verify_checked">Verify checked</option>
-          <option value="check">Check checkbox</option><option value="uncheck">Uncheck checkbox</option><option value="select">Select item</option>
-          <option value="expand">Expand menu / dropdown</option><option value="collapse">Collapse menu / dropdown</option>
-        </select></label>
-        <select aria-label={`Step ${i + 1} control`} disabled={busy} className="input-field" value={JSON.stringify(step.target)} onChange={e => update(i, { target: JSON.parse(e.target.value) })}>
-          {!controls.some(c => JSON.stringify(c.target) === JSON.stringify(step.target)) && <option value={JSON.stringify(step.target)}>Custom target — located during execution</option>}
-          {controls.map((c, index) => <option key={index} value={JSON.stringify(c.target)}>{c.target.control_type}: {c.label}</option>)}
-        </select>
-        <input aria-label={`Step ${i + 1} value`} disabled={busy || !['fill', 'verify_text'].includes(step.action)} className="input-field" placeholder="Exact text" value={step.value} onChange={e => update(i, { value: e.target.value })}/>
-        <details className="md:col-span-4"><summary className="text-xs text-indigo-500">Edit target for a control that appears later</summary><div className="grid md:grid-cols-3 gap-3">{['name','automation_id','control_type'].map(key=><label key={key} className="text-xs text-secondary">{key.replace('_',' ')}<input className="input-field" aria-label={`Step ${i+1} target ${key}`} disabled={busy} value={step.target?.[key]||''} onChange={e=>{const target={...step.target};if(e.target.value)target[key]=e.target.value;else delete target[key];update(i,{target});}}/></label>)}</div><p className="text-xs text-muted">Use the application's exact accessible name or automation ID. The control can appear after an earlier step; ambiguous matches fail instead of guessing.</p></details>
-        <div className="flex flex-wrap gap-2">
-          <button disabled={busy || i === 0} aria-label={`Move step ${i + 1} up`} onClick={() => { const next = [...steps]; [next[i-1], next[i]] = [next[i], next[i-1]]; replaceSteps(next); }}>↑ Move up</button>
-          <button disabled={busy || i === steps.length - 1} aria-label={`Move step ${i + 1} down`} onClick={() => { const next = [...steps]; [next[i+1], next[i]] = [next[i], next[i+1]]; replaceSteps(next); }}>↓ Move down</button>
-          <button disabled={busy} onClick={() => replaceSteps(steps.filter((_, index) => index !== i))}>Remove step {i + 1}</button>
-        </div>
-      </div>)}
-      <button className="btn-primary" disabled={busy || !controls.length || steps.length >= 100} onClick={() => replaceSteps([...steps, { action: 'click', target: controls[0].target, value: '', timeout_seconds: 10 }])}>Add step</button>
-      <button className="btn-primary" disabled={busy || loading || !steps.length} onClick={save}>Save test locally</button>
-      {steps.length > 0 && !steps.some(s => s.action.startsWith('verify_')) && <p className="text-secondary">This test has actions only. Add a verification step to check the outcome.</p>}
-      <p>{savedMessage}</p>
-    </section>
-    <section id="desktop-run" className="card p-6 space-y-4">
-      <h2 className="text-lg font-bold">3. Run and review</h2>
-      <label className="flex gap-3"><input type="checkbox" disabled={busy} checked={confirmed} onChange={e => setConfirmed(e.target.checked)}/>I authorize these actions in the selected test window.</label>
-      <div className="flex gap-4">
-        <button className="btn-primary" disabled={busy || loading || suiteDirty || (dirty && suiteIds.includes(testId)) || !window || !confirmed || !suiteId || !suiteIds.length || suiteIds.length > 20 || !controls.length} onClick={() => operate('run', true)}>Run selected suite</button>
-        <button className="btn-primary" disabled={busy || (testId && dirty) || !window || !steps.length || !confirmed || !readyTargets} onClick={() => operate('run')}>Run desktop test</button>
-        <button disabled={job?.status !== 'running'} onClick={() => DesktopService.stop(job.id).catch(e => setError(e.message))}>Stop operation</button>
-      </div>
-      {testId && dirty && <p className="text-secondary">Save changes before running this named test.</p>}
-      {suiteDirty && <p className="text-secondary">Save suite changes before running the selected suite.</p>}
-      <p role="status">{busy ? (job?.status === 'stopping' ? 'Stopping automation…' : 'Operation running…') : job ? operationKind === 'run' ? `Test result: ${job.status}` : operationKind === 'controls' && job.status === 'passed' ? `Inspection complete: ${controls.length} controls found. Add a step to continue.` : operationKind === 'windows' && job.status === 'passed' ? `Found ${windows.length} windows. Select your test application.` : `Inspection result: ${job.status}` : 'Ready'}</p>
-      {job?.steps?.map(s => <div key={s.step_number} className="border-b border-slate-400/30 py-3 break-words">
-        {s.test_name && <p className="text-secondary">{s.test_name}</p>}
-        <strong>Step {s.step_number}: {s.action} — {s.status}</strong><span className="text-secondary"> · {s.duration_ms == null ? 'Duration unavailable' : `${s.duration_ms} ms`} · {displayDate(s.completed_at)}</span>
-        {s.error && <p className="text-red-600 dark:text-red-400">{s.error}{s.error_type ? ` (${s.error_type})` : ''}</p>}
-        {s.recommendation && <p className="text-secondary">Recommended check: {s.recommendation}</p>}
-      </div>)}
-      {job?.tests?.map((t, i) => <p key={i}>{t.test_name} — {t.status}</p>)}
-      <p className="text-secondary text-sm">Stop terminates the automation worker, not the application. Pending steps are not passed. Leaving this screen does not stop an active job; stop it first. A run is capped at five minutes.</p>
-    </section>
-    <section id="desktop-history" className="card p-6 space-y-4">
-      <h2 className="text-lg font-bold">4. Local run history</h2>
-      <select aria-label="Filter run history" className="input-field" value={historyFilter} onChange={e => setHistoryFilter(e.target.value)}>
-        <option value="all">All results</option><option value="passed">Passed</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option><option value="interrupted">Interrupted</option><option value="timeout">Timed out</option>
-      </select>
-      {!history.length && <p>No saved runs yet.</p>}
-      {history.filter(run => historyFilter === 'all' || run.status === historyFilter).map(run => <details key={run.id} className="border-b border-slate-400/30 py-3">
-        <summary>{run.test_name || 'Earlier desktop run'} · {displayDate(run.created_at)} — {run.status} · {run.steps.length} steps</summary>
-        <div className="flex flex-wrap gap-3 my-3">
-          <button className="btn-primary" onClick={() => downloadDesktopReport(run, 'html')}>Download readable report</button>
-          <button className="btn-primary" onClick={() => downloadDesktopReport(run, 'json')}>Download JSON report</button>
-        </div>
-        <p className="text-secondary text-sm">Reports exclude saved inputs and control targets. Review test names and diagnostics before sharing. Open the readable report in a browser to print or save as PDF.</p>
-        {run.error && <p>{run.error}</p>}
-        {run.tests?.map((t, i) => <p key={i}>{t.test_name} — {t.status}</p>)}
-        {run.steps.map(s => <div key={s.step_number}><p>Step {s.step_number}: {s.action} — {s.status}</p>{s.error && <p>{s.error}</p>}{s.recommendation && <p>{s.recommendation}</p>}</div>)}
-      </details>)}
-    </section>
+  const [windows,setWindows]=useState([]);const [selected,setSelected]=useState('');const [inspected,setInspected]=useState(false);const [controls,setControls]=useState([]);
+  const [steps,setSteps]=useState([]);const [confirmed,setConfirmed]=useState(false);const [job,setJob]=useState(null);const [busy,setBusy]=useState(false);const [error,setError]=useState('');const [operationKind,setOperationKind]=useState('');
+  const [history,setHistory]=useState([]);const [savedMessage,setSavedMessage]=useState('');const [historyFilter,setHistoryFilter]=useState('all');const [loading,setLoading]=useState(true);
+  const [tests,setTests]=useState([]);const [testId,setTestId]=useState('');const [testName,setTestName]=useState('New desktop test');const [dirty,setDirty]=useState(false);
+  const [suiteIds,setSuiteIds]=useState([]);const [continueOnFailure,setContinueOnFailure]=useState(false);const [suiteMessage,setSuiteMessage]=useState('');const [suites,setSuites]=useState([]);const [suiteId,setSuiteId]=useState('');const [suiteName,setSuiteName]=useState('New desktop suite');
+  const storedSuite=suites.find(s=>s.id===suiteId);
+  const suiteDirty=!storedSuite||suiteName!==(storedSuite.name||'New desktop suite')||JSON.stringify(suiteIds)!==JSON.stringify(storedSuite.test_ids)||continueOnFailure!==Boolean(storedSuite.continue_on_failure);
+  const mounted=useRef(true);
+
+  function chooseSuite(suite){setSuiteId(suite?.id||'');setSuiteName(suite?.name||'New desktop suite');setSuiteIds(suite?.test_ids||[]);setContinueOnFailure(Boolean(suite?.continue_on_failure));setConfirmed(false);setSuiteMessage('');}
+  function switchSuite(id){if(suiteDirty&&(suiteId||suiteIds.length||suiteName!=='New desktop suite'||continueOnFailure)&&!globalThis.confirm('Discard unsaved suite changes?'))return;chooseSuite(suites.find(s=>s.id===id));}
+  async function saveSuite(){setBusy(true);setError('');try{const saved=await DesktopService.saveNamedSuite(project.id,suiteId,suiteName,suiteIds,continueOnFailure);setSuites(old=>[saved,...old.filter(s=>s.id!==saved.id)]);setSuiteId(saved.id);setSuiteName(saved.name);setSuiteMessage('Named suite order and failure policy saved locally.');setSyncRevision(n=>n+1);}catch(e){setError(e.message);}finally{setBusy(false);}}
+  function chooseTest(test){setTestId(test?.id||'');setTestName(test?.name||'New desktop test');setSteps(test?.steps||[]);setDirty(false);setConfirmed(false);setJob(null);setSavedMessage('');}
+  function switchTest(id){if(dirty&&!globalThis.confirm('Discard unsaved test changes?'))return;chooseTest(tests.find(t=>t.id===id));}
+  const displayDate=value=>value?new Date(value).toLocaleString():'Time unavailable';
+  useEffect(()=>{mounted.current=true;onSelectProject(project);return()=>{mounted.current=false;};},[]);
+  useEffect(()=>{Promise.all([DesktopService.listTests(project.id),DesktopService.history(project.id),DesktopService.listSuites(project.id)]).then(([saved,runs,stored])=>{if(mounted.current){setTests(saved);chooseTest(saved[0]);setHistory(runs);setSuites(stored);chooseSuite(stored[0]);}}).catch(e=>{if(mounted.current)setError(e.message);}).finally(()=>{if(mounted.current)setLoading(false);});},[project.id]);
+  async function reloadWorkspace(){const [saved,runs,stored]=await Promise.all([DesktopService.listTests(project.id),DesktopService.history(project.id),DesktopService.listSuites(project.id)]);setTests(saved);chooseTest(saved[0]);setHistory(runs);setSuites(stored);chooseSuite(stored[0]);}
+  async function save(){setBusy(true);setError('');try{const saved=await DesktopService.saveNamedTest(project.id,testId,testName,steps);setTests(old=>[saved,...old.filter(t=>t.id!==saved.id)]);setTestId(saved.id);setDirty(false);setSavedMessage('Test saved on this computer.');setSyncRevision(n=>n+1);}catch(e){setError(e.message);}finally{setBusy(false);}}
+  const targetWindow=windows.find(w=>String(w.handle)===selected);
+  const readyTargets=inspected&&steps.length>0&&steps.every(s=>s.target&&Object.keys(s.target).length&&Object.values(s.target).every(v=>typeof v==='string'&&v.trim()));
+  const readiness=!targetWindow?'Select a running application to begin.':!controls.length?'Inspect the selected window to identify its controls.':!steps.length?'Add an action and an assertion to build your test.':!readyTargets?'Reselect saved targets that are missing from this inspection.':!confirmed?'Review the steps and authorize interaction before running.':'Ready to run against the selected window.';
+  function replaceSteps(next){setSteps(next);setDirty(true);setConfirmed(false);setSavedMessage('Unsaved changes');}
+  async function operate(kind,suite=false){setBusy(true);setError('');setJob(null);setOperationKind(kind);try{const{id}=await DesktopService.createJob({kind,...targetWindow,steps,confirmed,project_id:project.id,test_id:kind==='run'?testId||undefined:undefined,...(suite?{suite_id:suiteId}:{})});if(!mounted.current)return;setJob({id,status:'running',steps:[]});let result;do{await new Promise(resolve=>setTimeout(resolve,400));if(!mounted.current)return;result=await DesktopService.getJob(id);if(!mounted.current)return;setJob(result);}while(['running','stopping'].includes(result.status));if(result.status==='passed'){if(kind==='windows'){setWindows(result.windows);setSelected('');setControls([]);setInspected(false);setConfirmed(false);}if(kind==='controls'){setControls(result.controls);setInspected(true);}}else if(result.error)setError(result.error);if(kind==='run'){setHistory(await DesktopService.history(project.id));setSyncRevision(n=>n+1);setActiveTab('results');}}catch(e){if(mounted.current)setError(e.message);}finally{if(mounted.current)setBusy(false);}}
+  function update(index,change){replaceSteps(steps.map((s,i)=>i===index?{...s,...change}:s));}
+  const latestRun=job?.steps?.length?job:history[0];
+  const passedRuns=history.filter(r=>r.status==='passed').length;
+  const rate=history.length?Math.round(passedRuns/history.length*100):0;
+
+  const testEditor=<div className="grid gap-5 xl:grid-cols-[300px_1fr]">
+    <aside className="card p-5 space-y-4"><div className="flex items-center justify-between"><div><p className="section-label">Test library</p><h2 className="font-bold mt-1">Saved desktop tests</h2></div><span className="badge badge-indigo">{tests.length}</span></div><select aria-label="Saved desktop test" className="input-field" disabled={busy||loading} value={testId} onChange={e=>switchTest(e.target.value)}><option value="">New unsaved test</option>{tests.map(t=><option key={t.id} value={t.id}>{t.name}</option>)}</select><button className="btn-ghost w-full justify-center" disabled={busy||loading} onClick={()=>switchTest('')}>New test</button><p className="text-xs text-secondary">Select a test to edit it. Saved history remains attached to the project.</p></aside>
+    <section className="card p-6 space-y-4"><div className="flex flex-col md:flex-row md:items-end justify-between gap-3"><label className="flex-1 text-sm font-semibold">Test name<input aria-label="Test name" className="input-field mt-2" maxLength={120} value={testName} disabled={busy||loading} onChange={e=>{setTestName(e.target.value);setDirty(true);setConfirmed(false);}}/></label><button className="btn-primary" disabled={busy||loading||!steps.length} onClick={save}>Save test locally</button></div><div className="border-t border-slate-200/60 dark:border-zinc-800 pt-4"><div className="flex items-center justify-between"><div><p className="section-label">Step builder</p><h2 className="font-bold mt-1">Actions and checks</h2></div><span className="badge badge-neutral">{steps.length}/100 steps</span></div><p className="text-xs text-secondary mt-2">Use protected variables for credentials and add a verification step for the expected outcome.</p></div>
+      {steps.map((step,i)=><div key={i} className="desktop-step-row"><label>Step {i+1}<select aria-label={`Step ${i+1} action`} disabled={busy} className="input-field" value={step.action} onChange={e=>update(i,{action:e.target.value})}><option value="click">Click</option><option value="fill">Fill text</option><option value="verify_text">Verify exact text</option><option value="verify_visible">Verify visible</option><option value="verify_enabled">Verify enabled</option><option value="verify_checked">Verify checked</option><option value="check">Check checkbox</option><option value="uncheck">Uncheck checkbox</option><option value="select">Select item</option><option value="expand">Expand menu / dropdown</option><option value="collapse">Collapse menu / dropdown</option></select></label><label>Control<select aria-label={`Step ${i+1} control`} disabled={busy} className="input-field" value={JSON.stringify(step.target)} onChange={e=>update(i,{target:JSON.parse(e.target.value)})}>{!controls.some(c=>JSON.stringify(c.target)===JSON.stringify(step.target))&&<option value={JSON.stringify(step.target)}>Custom target — located during execution</option>}{controls.map((c,index)=><option key={index} value={JSON.stringify(c.target)}>{c.target.control_type}: {c.label}</option>)}</select></label><label>Value<input aria-label={`Step ${i+1} value`} disabled={busy||!['fill','verify_text'].includes(step.action)} className="input-field" placeholder="Exact text" value={step.value} onChange={e=>update(i,{value:e.target.value})}/></label><div className="flex gap-2 items-end"><button disabled={busy||i===0} aria-label={`Move step ${i+1} up`} onClick={()=>{const next=[...steps];[next[i-1],next[i]]=[next[i],next[i-1]];replaceSteps(next);}}>↑</button><button disabled={busy||i===steps.length-1} aria-label={`Move step ${i+1} down`} onClick={()=>{const next=[...steps];[next[i+1],next[i]]=[next[i],next[i+1]];replaceSteps(next);}}>↓</button><button disabled={busy} onClick={()=>replaceSteps(steps.filter((_,index)=>index!==i))}>Remove step {i+1}</button></div><details className="md:col-span-4"><summary className="text-xs text-indigo-500">Edit target for a control that appears later</summary><div className="grid md:grid-cols-3 gap-3">{['name','automation_id','control_type'].map(key=><label key={key} className="text-xs text-secondary">{key.replace('_',' ')}<input className="input-field" aria-label={`Step ${i+1} target ${key}`} disabled={busy} value={step.target?.[key]||''} onChange={e=>{const target={...step.target};if(e.target.value)target[key]=e.target.value;else delete target[key];update(i,{target});}}/></label>)}</div></details></div>)}
+      <div className="flex flex-wrap items-center gap-3"><button className="btn-primary" disabled={busy||!controls.length||steps.length>=100} onClick={()=>replaceSteps([...steps,{action:'click',target:controls[0].target,value:'',timeout_seconds:10}])}>Add step</button><span className="text-sm text-secondary">{savedMessage}</span></div>{steps.length>0&&!steps.some(s=>s.action.startsWith('verify_'))&&<p className="status-panel bg-amber-500/10 text-amber-600 dark:text-amber-300">Add a verification step so this test checks a real outcome.</p>}
+    </section></div>;
+
+  const runResults=<>{job?.status&&<p role="status" className="status-panel bg-indigo-500/10 text-secondary">Test result: {job.status}</p>}{job?.steps?.map(s=><div key={s.step_number} className="result-row"><div><strong>Step {s.step_number}: {s.action}</strong><span className={`badge ml-2 ${s.status==='passed'?'badge-success':'badge-error'}`}>{s.status}</span></div><p className="text-xs text-secondary mt-1">{s.duration_ms==null?'Duration unavailable':`${s.duration_ms} ms`} · {displayDate(s.completed_at)}</p>{s.error&&<p className="text-sm text-red-500 mt-1">{s.error}</p>}{s.recommendation&&<p className="text-xs text-secondary mt-1">Recommended check: {s.recommendation}</p>}</div>)}{job?.tests?.map((t,i)=><p key={i}>{t.test_name} — {t.status}</p>)}</>;
+
+  return <div className="desktop-workspace max-w-7xl mx-auto space-y-6 text-primary" aria-busy={busy||loading}>
+    <header className="web-workspace-header relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-900 to-slate-800 dark:from-zinc-900 dark:to-[#0c0c0e] p-6"><div className="absolute top-0 right-0 w-72 h-72 bg-indigo-600/15 rounded-full blur-[80px]"/><div className="relative z-10 flex flex-col md:flex-row justify-between gap-5"><div className="space-y-3"><div className="flex items-center gap-2"><span className="badge badge-indigo">Desktop project</span><span className="text-xs text-slate-400" title={project.id}>Project #{String(project.id).slice(0,8)}</span></div><h1 className="text-2xl font-black text-white">{project.name}</h1><p className="text-sm text-slate-300">Build, synchronize, run and review Windows application tests from one project workspace.</p></div><div className="flex flex-wrap items-start gap-2"><button className="btn-ghost" onClick={()=>setActiveTab('upload')}><Upload size={14}/>Capture test</button><button className="btn-primary" onClick={()=>setActiveTab('runsuite')}><Play size={14}/>Run suite</button></div></div><div className="relative z-10 mt-5 pt-4 border-t border-white/10 grid grid-cols-3 gap-5 max-w-md">{[['Success rate',`${rate}%`],['Test cases',tests.length],['Total runs',history.length]].map(([label,value])=><div key={label}><p className="text-[10px] text-slate-400 uppercase tracking-wider">{label}</p><p className="text-lg font-black text-white mt-1">{value}</p></div>)}</div></header>
+    <nav className="project-tabs" aria-label="Desktop project pages">{TABS.map(tab=><button key={tab.id} onClick={()=>setActiveTab(tab.id)} className={activeTab===tab.id?'active':''} aria-current={activeTab===tab.id?'page':undefined}>{tab.label}</button>)}</nav>
+    {error&&<p role="alert" className="status-panel status-error break-words">{error}</p>}
+
+    {activeTab==='overview'&&<div className="grid lg:grid-cols-3 gap-5"><section className="card p-6 lg:col-span-2"><p className="section-label">Project overview</p><h2 className="text-xl font-bold mt-2">Desktop automation workspace</h2><p className="text-secondary text-sm mt-3">Create reusable tests and suites, inspect a running Windows application, and keep definitions and results synchronized with your account.</p><div className="grid sm:grid-cols-3 gap-3 mt-6">{[[Layers3,'Saved tests',tests.length],[Activity,'Inspected controls',controls.length],[History,'Passed runs',passedRuns]].map(([Icon,label,value])=><div key={label} className="overview-tile"><Icon size={18}/><div><p className="text-xs text-secondary">{label}</p><p className="text-xl font-bold">{value}</p></div></div>)}</div></section><section className="card p-6"><p className="section-label">Next action</p><h2 className="font-bold mt-2">{loading?'Loading workspace…':readiness}</h2><button className="btn-primary mt-5" onClick={()=>setActiveTab(!targetWindow?'runsuite':!steps.length?'testcases':'runsuite')}>{!targetWindow?'Select application':!steps.length?'Build a test':'Continue to run'}</button></section></div>}
+    {activeTab==='testcases'&&testEditor}
+    {activeTab==='assets'&&<div className="space-y-5"><div className="card p-6"><div className="flex items-center gap-3"><span className="tool-icon"><ShieldCheck size={20}/></span><div><p className="section-label">Project assets</p><h2 className="font-bold mt-1">Cloud workspace and protected credentials</h2></div></div><p className="text-sm text-secondary mt-4">Workspace definitions and run history synchronize through Supabase. Credential values remain encrypted on this Windows account and never leave this device.</p></div><WorkspaceTools project={project} disabled={busy||loading||dirty||Boolean(suiteId&&suiteDirty)} revision={syncRevision} onRestored={reloadWorkspace}/></div>}
+    {activeTab==='upload'&&<DraftTools project={project} disabled={busy||loading} onDraft={draft=>{if(dirty&&!globalThis.confirm('Replace the unsaved test draft?'))return;chooseTest(null);replaceSteps(draft);setActiveTab('testcases');}}/>}
+    {activeTab==='runsuite'&&<div className="grid xl:grid-cols-[1fr_1fr] gap-5"><section className="card p-6 space-y-4"><div><p className="section-label">Target application</p><h2 className="text-lg font-bold mt-1">Select and inspect a window</h2></div><p className="text-sm text-secondary">Open a disposable test document first. Avoid applications with important unsaved data.</p><div className="flex flex-wrap gap-3"><button className="btn-primary" disabled={busy||loading} onClick={()=>operate('windows')}>Refresh running windows</button><button className="btn-ghost" disabled={busy||!targetWindow} onClick={()=>operate('controls')}>Inspect selected window</button></div><select aria-label="Application window" className="input-field" disabled={busy} value={selected} onChange={e=>{setSelected(e.target.value);setControls([]);setInspected(false);setConfirmed(false);}}><option value="">Select a window</option>{windows.map(w=><option key={w.handle} value={w.handle}>{w.title} · PID {w.process_id}</option>)}</select><p className="status-panel bg-indigo-500/10 text-secondary" aria-live="polite">{loading?'Loading saved tests and history…':readiness}</p></section>
+      <section className="card p-6 space-y-4"><div><p className="section-label">Suite configuration</p><h2 className="text-lg font-bold mt-1">Choose tests in execution order</h2></div><select aria-label="Saved desktop suite" className="input-field" disabled={busy||loading} value={suiteId} onChange={e=>switchSuite(e.target.value)}><option value="">New unsaved suite</option>{suites.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select><label className="text-sm font-semibold">Suite name<input aria-label="Suite name" className="input-field mt-2" maxLength={120} disabled={busy||loading} value={suiteName} onChange={e=>{setSuiteName(e.target.value);setConfirmed(false);}}/></label><button className="btn-ghost" disabled={busy||loading} onClick={()=>switchSuite('')}>New suite</button><div className="suite-test-list">{tests.length?tests.map(t=><label key={t.id}><input type="checkbox" aria-label={`Include ${t.name} in suite`} disabled={busy||loading} checked={suiteIds.includes(t.id)} onChange={e=>{setSuiteIds(old=>e.target.checked?[...old,t.id]:old.filter(id=>id!==t.id));setConfirmed(false);}}/><span>{t.name}</span>{suiteIds.includes(t.id)&&<span className="badge badge-indigo">#{suiteIds.indexOf(t.id)+1}</span>}</label>):<p className="text-sm text-secondary">Create and save a test before building a suite.</p>}</div><label className="flex gap-3 text-sm"><input type="checkbox" aria-label="Continue suite after failure" disabled={busy} checked={continueOnFailure} onChange={e=>{setContinueOnFailure(e.target.checked);setConfirmed(false);}}/>Continue after failed tests</label><button className="btn-primary" disabled={busy||loading||!suiteIds.length} onClick={saveSuite}>Save suite locally</button><p className="text-sm text-secondary">{suiteMessage}</p></section>
+      <section className="card p-6 space-y-4 xl:col-span-2"><div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4"><div><p className="section-label">Run and review</p><h2 className="text-lg font-bold mt-1">Authorize this execution</h2></div><div className="flex flex-wrap gap-3"><button className="btn-primary" disabled={busy||loading||suiteDirty||(dirty&&suiteIds.includes(testId))||!targetWindow||!confirmed||!suiteId||!suiteIds.length||suiteIds.length>20||!controls.length} onClick={()=>operate('run',true)}>Run selected suite</button><button className="btn-primary" disabled={busy||(testId&&dirty)||!targetWindow||!steps.length||!confirmed||!readyTargets} onClick={()=>operate('run')}>Run desktop test</button><button className="btn-ghost" disabled={job?.status!=='running'} onClick={()=>DesktopService.stop(job.id).catch(e=>setError(e.message))}>Stop operation</button></div></div><label className="authorization-card"><input type="checkbox" disabled={busy} checked={confirmed} onChange={e=>setConfirmed(e.target.checked)}/><span><strong>I authorize these actions in the selected test window.</strong><small>Authorization resets when the window, steps, test, or suite changes.</small></span></label>{testId&&dirty&&<p className="text-sm text-secondary">Save test changes before running this named test.</p>}{suiteDirty&&<p className="text-sm text-secondary">Save suite changes before running the selected suite.</p>}<p role="status" className="text-sm">{busy?(job?.status==='stopping'?'Stopping automation…':'Operation running…'):job?operationKind==='run'?`Test result: ${job.status}`:operationKind==='controls'&&job.status==='passed'?`Inspection complete: ${controls.length} controls found.`:operationKind==='windows'&&job.status==='passed'?`Found ${windows.length} windows.`:`Inspection result: ${job.status}`:'Ready'}</p></section></div>}
+    {activeTab==='history'&&<section className="card p-6 space-y-4"><div className="flex flex-col md:flex-row md:items-center justify-between gap-3"><div><p className="section-label">Execution history</p><h2 className="text-lg font-bold mt-1">Previous desktop runs</h2></div><select aria-label="Filter run history" className="input-field md:max-w-xs" value={historyFilter} onChange={e=>setHistoryFilter(e.target.value)}><option value="all">All results</option><option value="passed">Passed</option><option value="failed">Failed</option><option value="cancelled">Cancelled</option><option value="interrupted">Interrupted</option><option value="timeout">Timed out</option></select></div>{!history.length&&<div className="empty-state"><History size={28}/><p>No saved runs yet.</p></div>}{history.filter(run=>historyFilter==='all'||run.status===historyFilter).map(run=><button key={run.id} className="history-row" onClick={()=>{setJob(run);setActiveTab('results');}}><span><strong>{run.test_name||'Earlier desktop run'}</strong><small>{displayDate(run.created_at)} · {run.steps.length} steps</small></span><span className={`badge ${run.status==='passed'?'badge-success':'badge-error'}`}>{run.status}</span></button>)}</section>}
+    {activeTab==='results'&&<section className="card p-6 space-y-4"><div><p className="section-label">Latest result</p><h2 className="text-lg font-bold mt-1">Execution details</h2></div>{latestRun?<><div className="grid sm:grid-cols-3 gap-3">{[['Status',latestRun.status],['Steps',latestRun.steps?.length||0],['Completed',displayDate(latestRun.created_at)]].map(([label,value])=><div className="overview-tile" key={label}><div><p className="text-xs text-secondary">{label}</p><p className="font-bold mt-1">{value}</p></div></div>)}</div>{latestRun.error&&<p className="status-panel status-error">{latestRun.error}</p>}{runResults}</>:<div className="empty-state"><CheckCircle2 size={28}/><p>No results are available yet.</p><button className="btn-primary" onClick={()=>setActiveTab('runsuite')}>Run a test</button></div>}</section>}
+    {activeTab==='report'&&<section className="card p-6 space-y-4"><div><p className="section-label">Reports</p><h2 className="text-lg font-bold mt-1">Download execution evidence</h2><p className="text-sm text-secondary mt-2">Reports exclude saved inputs, control targets, and window identity.</p></div>{!history.length&&<div className="empty-state"><FileText size={28}/><p>Run a test to create a report.</p></div>}{history.map(run=><div key={run.id} className="report-row"><div><strong>{run.test_name||'Desktop run'}</strong><p className="text-xs text-secondary mt-1">{displayDate(run.created_at)} · {run.status}</p></div><div className="flex flex-wrap gap-2"><button className="btn-ghost" onClick={()=>downloadDesktopReport(run,'html')}><Download size={14}/>Readable report</button><button className="btn-ghost" onClick={()=>downloadDesktopReport(run,'json')}><Download size={14}/>JSON report</button></div></div>)}</section>}
   </div>;
 }
