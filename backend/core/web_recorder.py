@@ -11,10 +11,11 @@ SCRIPT=r'''(() => {
   const target = el => {
     const testid=el.getAttribute('data-testid');if(testid)return 'testid:'+testid;
     const label=el.getAttribute('aria-label') || (el.labels?.[0]?.textContent || '').trim();if(label)return 'label:'+label;
+    const text=(el.textContent||'').trim().replace(/\s+/g,' ');
+    if(el.tagName==='BUTTON' && text && text.length<160)return 'role:button:'+text;
     if(el.id)return 'css:#'+CSS.escape(el.id);
     if(el.getAttribute('placeholder'))return 'placeholder:'+el.getAttribute('placeholder');
-    const text=(el.textContent||'').trim().replace(/\s+/g,' ');
-    if(text && text.length<160)return (el.tagName==='BUTTON'?'role:button:':'text:')+text;
+    if(text && text.length<160)return 'text:'+text;
     return null;
   };
   const send=(step)=>window.__qaRecord(step).catch(()=>{});
@@ -58,6 +59,11 @@ def run(job,url,headless=False):
                     try:step=clean_event(event)
                     except ValueError:return
                     with LOCK:
+                        signature=(step['action'],step['target'],step['value'])
+                        now=time.monotonic()
+                        if signature==job.get('_last_signature') and now-job.get('_last_capture',0)<1:
+                            return
+                        job['_last_signature']=signature;job['_last_capture']=now
                         if len(job['steps'])<100:job['steps'].append(step)
                         else:job['warning']='Recording reached 100 steps. Stop and review the draft.'
                 context.expose_binding('__qaRecord',capture)
@@ -87,7 +93,7 @@ def snapshot(identifier,user_id):
     with LOCK:
         job=JOBS.get(identifier)
         if not job or job['user_id']!=user_id:return None
-        return {key:list(value) if key=='steps' else value for key,value in job.items() if key not in ('started','stop','user_id')}
+        return {key:list(value) if key=='steps' else value for key,value in job.items() if key not in ('started','stop','user_id','_last_signature','_last_capture')}
 
 def stop(identifier,user_id):
     with LOCK:

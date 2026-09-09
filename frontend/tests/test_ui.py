@@ -47,18 +47,24 @@ class FrontendIntegrationTests(unittest.TestCase):
         self.page.get_by_label('Action', exact=True).select_option('verify')
         self.page.get_by_label('Target', exact=True).fill('Open incidents')
         self.page.get_by_role('button', name='Add step', exact=True).click()
-        self.page.get_by_role('button', name='Edit', exact=True).click()
+        self.page.get_by_role('button', name='Edit step 1', exact=True).click()
         self.page.get_by_label('Target', exact=True).fill('Overview')
-        self.page.get_by_role('button', name='Apply step edit', exact=True).click()
-        expect(self.page.get_by_text('1. verify — Overview', exact=True)).to_be_visible()
+        self.page.get_by_role('button', name='Apply changes', exact=True).click()
+        expect(self.page.get_by_role('paragraph').filter(has_text='Overview')).to_be_visible()
 
     def test_runtime_variables_reach_runner_without_changing_saved_definition(self):
         content = b'Test Case,Step,Action,Target,Value,Expected Type,Expected Value\nLogin,1,fill,Password,{{test_password}},field_value,{{test_password}}\n'
         self.page.locator('input[type=file][accept=".txt,.csv"]').set_input_files({'name':'variables.csv','mimeType':'text/csv','buffer':content})
         self.page.locator('button[type=submit]').click()
+        expect(self.page.get_by_text('Review before saving', exact=True)).to_be_visible()
+        self.page.get_by_label('I reviewed the test definition warnings').check()
+        self.page.locator('button[type=submit]').click()
         self.page.wait_for_function('window.fixture.saved.length === 1')
         self.page.get_by_role('button', name='Run Suite', exact=True).last.click()
+        expect(self.page.get_by_role('button', name='Launch Playwright Execution', exact=True)).to_be_disabled()
+        expect(self.page.get_by_text('Required before running: test_password', exact=True)).to_be_visible()
         self.page.get_by_label('test_password', exact=True).fill('fixture-secret')
+        expect(self.page.get_by_role('button', name='Launch Playwright Execution', exact=True)).to_be_enabled()
         self.page.get_by_role('button', name='Launch Playwright Execution', exact=True).click()
         self.page.wait_for_function('window.fixture.executions.length === 1')
         payload = self.page.evaluate('window.fixture.executions[0]')
@@ -69,6 +75,22 @@ class FrontendIntegrationTests(unittest.TestCase):
         self.assertEqual(saved['cached_json'][0]['value'], '{{test_password}}')
         self.assertNotIn('fixture-secret', str(saved))
 
+    def test_action_only_test_requires_inline_review_and_run_authorization(self):
+        content=b'Test Case,Step,Action,Target,Value\nNavigation,1,click,Sign In,\n'
+        self.page.locator('input[type=file][accept=".txt,.csv"]').set_input_files({'name':'actions.csv','mimeType':'text/csv','buffer':content})
+        self.page.locator('button[type=submit]').click()
+        expect(self.page.get_by_text('Review before saving',exact=True)).to_be_visible()
+        self.assertEqual(self.page.evaluate('window.fixture.saved.length'),0)
+        self.page.get_by_label('I reviewed the test definition warnings').check()
+        self.page.locator('button[type=submit]').click()
+        self.page.wait_for_function('window.fixture.saved.length === 1')
+        self.page.get_by_role('button',name='Run Suite',exact=True).last.click()
+        launch=self.page.get_by_role('button',name='Launch Playwright Execution',exact=True)
+        expect(launch).to_be_disabled()
+        self.page.get_by_label('Authorize action-only diagnostic run').check()
+        expect(launch).to_be_enabled()
+        launch.click()
+        self.page.wait_for_function('window.fixture.executions.length === 1')
     def test_report_does_not_pass_empty_results(self):
         self.page.get_by_role('button', name='Results', exact=True).click()
         expect(self.page.get_by_text('No results', exact=True)).to_be_visible()
@@ -87,7 +109,7 @@ class FrontendIntegrationTests(unittest.TestCase):
         self.page.get_by_role('checkbox',name='I authorize sending this test recording').check()
         expect(button).to_be_enabled()
         button.click()
-        expect(self.page.get_by_text('Your draft is ready for review')).to_be_visible()
+        expect(self.page.get_by_text('Draft generated — review before saving')).to_be_visible()
         self.assertEqual(self.page.evaluate('window.fixture.executions.length'),0)
 
 if __name__ == '__main__':

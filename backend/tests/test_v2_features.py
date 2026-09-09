@@ -8,7 +8,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from utils import local_store
 from core import credential_vault as vault
 from core.web_recorder import clean_event, SCRIPT
-from routes.video_draft_routes import analyze_video, validate_draft
+from routes.video_draft_routes import analyze_video, parse_video_candidate, validate_draft
 
 class VaultTests(unittest.TestCase):
     def setUp(self):
@@ -52,6 +52,19 @@ class DraftTests(unittest.TestCase):
         result=validate_draft({'steps':[{'action':'goto','target':'url','value':'https://example.com'}]},'web')
         self.assertEqual(result['steps'][0],{'action':'goto','target':'https://example.com','value':''})
 
+    def test_video_candidate_repairs_fences_arrays_and_action_aliases(self):
+        candidate=parse_video_candidate('```json\n[{"type":"navigate","selector":"https://example.com"},{"action":"tap","element":"Sign In"}]\n```')
+        result=validate_draft(candidate,'web')
+        self.assertEqual([step['action'] for step in result['steps']],['goto','click'])
+        self.assertEqual(result['steps'][1]['target'],'Sign In')
+
+    def test_invalid_first_video_response_is_retried_once(self):
+        invalid=Mock(status_code=200);invalid.json.return_value={'candidates':[{'content':{'parts':[{'text':'not json'}]}}]}
+        valid=Mock(status_code=200);valid.json.return_value={'candidates':[{'content':{'parts':[{'text':json.dumps({'steps':[{'action':'verify','target':'Dashboard','value':''}]})}]}}]}
+        with patch('routes.video_draft_routes.GEMINI_API_KEY','fixture-key'), patch('routes.video_draft_routes.requests.post',side_effect=[invalid,valid]) as post:
+            result=analyze_video(b'small','video/mp4','web','https://example.com','gemini-fixture')
+        self.assertTrue(result['requires_review'])
+        self.assertEqual(post.call_count,2)
     def test_ai_draft_rejects_invalid_actions(self):
         with self.assertRaises(ValueError):validate_draft({'steps':[{'action':'shell','target':{'name':'x'}}]},'desktop')
 
@@ -72,6 +85,8 @@ class DraftTests(unittest.TestCase):
         self.assertIn('inlineData',post.call_args.kwargs['json']['contents'][0]['parts'][1])
         delete.assert_not_called()
 class RecorderBrowserTests(unittest.TestCase):
+    def test_recorder_prefers_button_name_before_css_id(self):
+        self.assertLess(SCRIPT.index("el.tagName==='BUTTON'"),SCRIPT.index("if(el.id)"))
     def test_real_browser_records_inputs_without_password_values(self):
         from playwright.sync_api import sync_playwright
         with sync_playwright() as pw:

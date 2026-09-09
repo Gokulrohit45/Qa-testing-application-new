@@ -40,4 +40,4 @@ export const DesktopCloudService={sync:async()=>({revision:1,direction:'uploaded
 export const VaultService={list:async()=>[],save:async()=>({configured:true}),remove:async()=>({success:true})};
 
 export const RecordingService={start:async()=>({id:'recording',status:'recording',steps:[]}),get:async()=>({status:'review',steps:[{action:'goto',target:'https://example.com',value:''}]}),stop:async()=>({stopping:true})};
-export const VideoDraftService={create:async()=>({steps:[],warnings:[]})};
+export const VideoDraftService={create:async()=>({steps:[{action:'goto',target:'https://example.com',value:''},{action:'verify',target:'Dashboard',value:''}],warnings:['Review generated targets before saving.']})};

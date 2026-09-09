@@ -15,6 +15,33 @@ _ACTIVE=set();_LOCK=threading.Lock()
 MAX_VIDEO_MB=100
 MAX_VIDEO_BYTES=MAX_VIDEO_MB*1024*1024
 INLINE_VIDEO_BYTES=15*1024*1024
+ACTION_ALIASES={'navigate':'goto','navigate_to':'goto','open':'goto','visit':'goto','type':'fill','input':'fill','enter':'fill','press':'click','tap':'click','assert':'verify','check_text':'verify','verify_text':'verify'}
+
+def parse_video_candidate(text):
+    value=str(text or '').strip()
+    value=re.sub(r'^```(?:json)?\s*|\s*```$','',value,flags=re.I)
+    try:candidate=json.loads(value)
+    except json.JSONDecodeError:
+        starts=[index for index in (value.find('{'),value.find('[')) if index>=0]
+        if not starts:raise ValueError('The AI response did not contain JSON test steps')
+        try:candidate=json.JSONDecoder().raw_decode(value[min(starts):])[0]
+        except json.JSONDecodeError as error:raise ValueError('The AI response contained incomplete JSON') from error
+    if isinstance(candidate,list):candidate={'steps':candidate}
+    if isinstance(candidate,dict) and not isinstance(candidate.get('steps'),list):
+        for key in ('test_steps','actions','workflow'):
+            if isinstance(candidate.get(key),list):candidate={'steps':candidate[key]};break
+    if not isinstance(candidate,dict) or not isinstance(candidate.get('steps'),list):raise ValueError('The AI response did not contain a steps list')
+    repaired=[]
+    for item in candidate['steps']:
+        if not isinstance(item,dict):continue
+        step=dict(item)
+        action=str(step.get('action') or step.get('type') or '').strip().lower().replace(' ','_')
+        step['action']=ACTION_ALIASES.get(action,action)
+        if step.get('target') in (None,''):
+            step['target']=step.get('selector') or step.get('element') or step.get('control') or ''
+        if step.get('value') is None:step['value']=''
+        repaired.append(step)
+    return {'steps':repaired}
 
 def validate_draft(candidate,project_type):
     if not isinstance(candidate,dict) or not isinstance(candidate.get('steps'),list) or not 1<=len(candidate['steps'])<=100:
@@ -88,7 +115,16 @@ def analyze_video(content,mime,project_type,url,model):
         body=response.json();parts=body.get('candidates',[{}])[0].get('content',{}).get('parts',[])
         result=''.join(part.get('text','') for part in parts)
         if len(result)>200000:raise ValueError('Video draft is too large')
-        return validate_draft(json.loads(result),project_type)
+        try:return validate_draft(parse_video_candidate(result),project_type)
+        except ValueError as first_error:
+            retry=requests.post(f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',
+                headers={'x-goog-api-key':GEMINI_API_KEY,'Content-Type':'application/json'},
+                json={'contents':[{'parts':[{'text':instructions+' The previous response was invalid: '+str(first_error)+'. Return a corrected JSON object only.'},media]}],
+                      'generationConfig':{'responseMimeType':'application/json','temperature':0}},timeout=(10,120))
+            if retry.status_code!=200:raise first_error
+            retry_parts=retry.json().get('candidates',[{}])[0].get('content',{}).get('parts',[])
+            retry_text=''.join(part.get('text','') for part in retry_parts)
+            return validate_draft(parse_video_candidate(retry_text),project_type)
     finally:
         if uploaded and uploaded.get('name'):
             try:requests.delete(f"https://generativelanguage.googleapis.com/v1beta/{uploaded['name']}",params={'key':GEMINI_API_KEY},timeout=(10,20))
@@ -118,7 +154,7 @@ def create_draft():
         if user in _ACTIVE:return jsonify(error='Your previous video analysis is still running'),429
         _ACTIVE.add(user)
     try:return jsonify(analyze_video(content,file.mimetype,project_type,url,model))
-    except (ValueError,KeyError,IndexError):return jsonify(error='A valid draft could not be produced. Try a shorter, clearer recording'),422
+    except (ValueError,KeyError,IndexError) as error:return jsonify(error='A valid draft could not be produced',reason=str(error)),422
     except requests.RequestException:return jsonify(error='Video analysis timed out. Please retry'),504
     finally:
         with _LOCK:_ACTIVE.discard(user)

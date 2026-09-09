@@ -140,6 +140,10 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
   const [runVariables, setRunVariables] = useState({});
   useEffect(() => { setRunVariables({}); }, [id]);
   const [savingUpload, setSavingUpload] = useState(false);
+  const [uploadIssues, setUploadIssues] = useState([]);
+  const [uploadReviewAccepted, setUploadReviewAccepted] = useState(false);
+  const [runError, setRunError] = useState('');
+  const [allowActionOnly, setAllowActionOnly] = useState(false);
 
   // Video State
   const [videoPath, setVideoPath] = useState(project?.video_file_path || '');
@@ -266,102 +270,75 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
   }, [executing, elapsedSeconds, executionLogs.length, selectedTestCaseId]);
 
   const handleLaunchExecution = async () => {
-    if (!project) return;
+    if (!project || executing) return;
     const targetTc = testCases.find(tc => String(tc.id) === String(selectedTestCaseId)) || testCases[0];
-    
-    const comparableRuns = execHistory
-      .filter(run => String(run.test_id || '') === String(targetTc?.id || '') && ['Passed', 'Failed'].includes(run.status) && Number(run.duration_ms) > 0)
-      .slice(0, 10)
-      .map(run => Math.round(Number(run.duration_ms) / 1000))
-      .sort((a, b) => a - b);
-    const historyMedian = comparableRuns.length
-      ? comparableRuns[Math.floor(comparableRuns.length / 2)]
-      : 0;
-    const explicitWaitSeconds = (targetTc?.cached_json || []).reduce((sum, step) =>
-      String(step.action).toLowerCase() === 'wait' ? sum + Math.round(Number(step.value || 0) / 1000) : sum, 0);
-    const structuralEstimate = Math.max(15, explicitWaitSeconds + Math.max(1, (targetTc?.cached_json || []).length) * 2);
-    const avgDuration = historyMedian || structuralEstimate;
-
-    setTotalEstimatedTime(avgDuration);
-    setCountdown(avgDuration);
-    setElapsedSeconds(0);
-    setEstimateLearning(comparableRuns.length === 0);
-    setFinalDuration(0);
-    const commandStepCount = targetTc?.commands?.split('\n').filter(line => line.trim()).length || 0;
-    const configuredStepCount = Math.max(commandStepCount, (targetTc?.cached_json || []).length, 1);
-    setExecutionTotalSteps(configuredStepCount);
-    startTimeRef.current = Date.now();
-
-    setExecuting(true);
-    setExecutionLogs([]);
-    setExecutionStatus('Running');
-    setResultsLogs([]);
-    setResultsStatus('Running');
-    setResultsError('');
-    setResultsId('');
-    setActiveTab('liverun');
+    if (!targetTc) { setRunError('Create and select a test case before running.'); return; }
+    setRunError('');
     try {
+      let stepsToRun = targetTc.cached_json || [];
+      if (stepsToRun.length === 0 && targetTc.commands) {
+        const parsed = await AIService.translatePrompt(targetTc.commands);
+        if (parsed.requires_review) {
+          setRunError('Review and save the generated steps in Test Cases before running this test.');
+          setActiveTab('testcases');
+          return;
+        }
+        stepsToRun = parsed?.steps || [];
+      }
+      const validation = await AIService.validateSteps(stepsToRun);
+      stepsToRun = validation.steps || stepsToRun;
+      const requiredVariables = variableNames(stepsToRun);
+      const missingVariables = requiredVariables.filter(name => !String(runVariables[name] || '').trim());
+      if (missingVariables.length) {
+        setRunError(`Enter the required runtime test data: ${missingVariables.join(', ')}.`);
+        setActiveTab('runsuite');
+        return;
+      }
+      const hasOutcome = stepsToRun.some(step => ['verify','verify_text'].includes(step.action) || step.expected_type);
+      if (!hasOutcome && !allowActionOnly) {
+        setRunError('This test has no outcome check. Add a verification step, or explicitly authorize an action-only diagnostic run below.');
+        setActiveTab('runsuite');
+        return;
+      }
+
       await AssetService.prepareAssetsForExecution(project.id);
       let executionVideoPath = project.video_file_path || videoPath;
       if (project.face_auth_enabled && !executionVideoPath && faceVideoStoragePath) {
-        setVideoRestoring(true);
-        setVideoRestoreError('');
+        setVideoRestoring(true); setVideoRestoreError('');
         try {
           const restored = await AssetService.restoreFaceVideo(faceVideoStoragePath, project.id);
           executionVideoPath = restored?.y4m_path || '';
           if (!executionVideoPath) throw new Error('The local engine did not return a converted face-video path');
           setVideoPath(executionVideoPath);
-          await ProjectService.updateProject(project.id, {
-            video_file_path: executionVideoPath,
-            face_video_storage_path: faceVideoStoragePath
-          });
-        } catch (error) {
-          setVideoRestoreError(error.message);
-          throw new Error(`Face video could not be restored on this computer: ${error.message}`);
-        } finally {
-          setVideoRestoring(false);
-        }
+          await ProjectService.updateProject(project.id, {video_file_path:executionVideoPath,face_video_storage_path:faceVideoStoragePath});
+        } finally { setVideoRestoring(false); }
       }
-      let stepsToRun = targetTc?.cached_json || [];
-      if (stepsToRun.length === 0 && targetTc?.commands) {
-        const parsed = await AIService.translatePrompt(targetTc.commands);
-        if (parsed.requires_review && !window.confirm('Review AI steps before execution:\n' + JSON.stringify(parsed.steps, null, 2))) throw new Error('Review cancelled');
-        stepsToRun = parsed?.steps || [];
-      }
-      const validation = await AIService.validateSteps(stepsToRun);
-      if (validation.warnings?.some(w => w.startsWith('No expected')) && !window.confirm('This test has no outcome checks. Continue with action-only execution?')) throw new Error('Run cancelled before execution');
+
+      const comparableRuns = execHistory.filter(run => String(run.test_id || '') === String(targetTc.id || '') && ['Passed','Failed'].includes(run.status) && Number(run.duration_ms) > 0).slice(0,10).map(run => Math.round(Number(run.duration_ms) / 1000)).sort((a,b) => a-b);
+      const historyMedian = comparableRuns.length ? comparableRuns[Math.floor(comparableRuns.length / 2)] : 0;
+      const explicitWaitSeconds = stepsToRun.reduce((sum, step) => String(step.action).toLowerCase() === 'wait' ? sum + Math.round(Number(step.value || 0) / 1000) : sum, 0);
+      const structuralEstimate = Math.max(15, explicitWaitSeconds + Math.max(1, stepsToRun.length) * 2);
+      const avgDuration = historyMedian || structuralEstimate;
+      const configuredStepCount = Math.max(targetTc.commands?.split('\n').filter(line => line.trim()).length || 0, stepsToRun.length, 1);
+      setTotalEstimatedTime(avgDuration); setCountdown(avgDuration); setElapsedSeconds(0);
+      setEstimateLearning(comparableRuns.length === 0); setFinalDuration(0); setExecutionTotalSteps(configuredStepCount);
+      setExecuting(true); setExecutionLogs([]); setExecutionStatus('Running'); setResultsLogs([]); setResultsStatus('Running');
+      setResultsError(''); setResultsId(''); startTimeRef.current = Date.now(); setActiveTab('liverun');
       const res = await ExecutionService.triggerExecution({
-        project_id: project.id,
-        test_id: targetTc?.id,
-        user_id: project.user_id,
-        app_url: project.app_url,
-        steps: stepsToRun.length > 0 ? stepsToRun : [
-          { action: 'goto', target: project.app_url, value: '', raw_command: `Navigate to ${project.app_url}` }
-        ],
-        commands: targetTc?.commands || '',
-        structured: targetTc?.type === 'structured',
-        variables: runVariables,
-        expected_step_count: configuredStepCount,
-        face_auth_enabled: project.face_auth_enabled,
-        y4m_path: executionVideoPath,
-        headless,
-        timeout_seconds: Number(timeoutSec)
+        project_id:project.id,test_id:targetTc.id,user_id:project.user_id,app_url:project.app_url,steps:stepsToRun,
+        commands:targetTc.commands || '',structured:targetTc.type === 'structured',variables:runVariables,
+        expected_step_count:configuredStepCount,face_auth_enabled:project.face_auth_enabled,y4m_path:executionVideoPath,
+        headless,timeout_seconds:Number(timeoutSec)
       });
-      if (res?.execution_id) {
-        setExecutionId(res.execution_id);
-        setExecutionTotalSteps(Number(res.total_steps) || configuredStepCount);
-        startPollingLogs(res.execution_id);
-      }
+      if (!res?.execution_id) throw new Error('The local test engine did not start an execution.');
+      setExecutionId(res.execution_id); setExecutionTotalSteps(Number(res.total_steps) || configuredStepCount); startPollingLogs(res.execution_id);
     } catch (err) {
-      alert('Local daemon execution failed: ' + err.message);
-      setExecuting(false);
-      setExecutionStatus('Failed');
-      setResultsStatus('Failed');
-      setResultsError(err.message);
-      setFinalDuration(Math.round((Date.now() - startTimeRef.current) / 1000));
+      const message = err?.details?.error || err?.message || 'The test could not start.';
+      setExecuting(false); setExecutionStatus('Failed'); setResultsStatus('Failed'); setResultsError(message);
+      setRunError(message); setFinalDuration(startTimeRef.current ? Math.round((Date.now() - startTimeRef.current) / 1000) : 0);
+      setActiveTab('runsuite');
     }
   };
-
   const handleStopRun = async () => {
     try {
       if (executionId) {
@@ -416,10 +393,10 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
         log.error_message || ''
       ]);
     });
-    
-    const csvContent = "data:text/csv;charset=utf-8," 
+
+    const csvContent = "data:text/csv;charset=utf-8,"
       + [headers.join(","), ...rows.map(e => e.map(val => `"${String(val).replace(/"/g, '""')}"`).join(","))].join("\n");
-      
+
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
@@ -486,35 +463,27 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
       let groups = uploadGroups;
       if (!groups) {
         const parsed = await AIService.translatePrompt(uploadCommands);
-        if (parsed.requires_review && !window.confirm('Review AI-generated steps before saving:\n' + JSON.stringify(parsed.steps, null, 2))) return;
-        groups = [{ name: uploadTcName, steps: parsed.steps }];
+        groups = [{name:uploadTcName,steps:parsed.steps}];
       }
-      const checked = [];
+      const checked=[];
       for (const group of groups) {
-        const validation = await AIService.validateSteps(group.steps);
-        checked.push({...group, steps: validation.steps, warnings: validation.warnings});
+        const validation=await AIService.validateSteps(group.steps);
+        checked.push({...group,steps:validation.steps,warnings:validation.warnings});
       }
-      const warnings = checked.flatMap(g => g.warnings || []);
-      if (warnings.length && !window.confirm(warnings.join('\n') + '\nSave this test definition?')) return;
+      const warnings=[...new Set(checked.flatMap(group=>{const steps=group.steps||[];const local=[];variableNames(steps).forEach(name=>local.push("Runtime test data required: "+name));if(!steps.some(step=>["verify","verify_text"].includes(step.action)||step.expected_type))local.push("No expected outcomes: this test checks action execution only, not functional correctness.");return [...(group.warnings||[]),...local];}))];
+      setUploadIssues(warnings);
+      if (warnings.length && !uploadReviewAccepted) return;
       for (const group of checked) {
-        const newTc = await TestCaseService.createTestCase({
-          project_id: id, name: group.name, commands: describeSteps(group.steps),
-          cached_json: group.steps, type: 'structured', status: 'ready'
-        });
-        setTestCases(prev => [newTc, ...prev]);
+        const newTc=await TestCaseService.createTestCase({project_id:id,name:group.name,commands:describeSteps(group.steps),cached_json:group.steps,type:'structured',status:'ready'});
+        setTestCases(previous=>[newTc,...previous]);
         setSelectedTestCaseId(newTc.id);
       }
-      setUploadTcName('');
-      setUploadCommands('');
-      setUploadGroups(null);
-      setActiveTab('testcases');
+      setUploadTcName('');setUploadCommands('');setUploadGroups(null);
+      setUploadIssues([]);setUploadReviewAccepted(false);setActiveTab('testcases');
     } catch (err) {
-      alert('Failed to import test case: ' + err.message);
-    } finally {
-      setSavingUpload(false);
-    }
+      setUploadIssues([err?.details?.error || err.message || 'The test case could not be saved.']);
+    } finally { setSavingUpload(false); }
   };
-
   const handleSaveEditModal = async () => {
     if (!editingTc) return;
     try {
@@ -624,6 +593,11 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
   }
 
   const selectedTc = testCases.find(tc => String(tc.id) === String(selectedTestCaseId)) || testCases[0];
+  const selectedSteps = selectedTc?.cached_json || [];
+  const requiredRunVariables = variableNames(selectedSteps);
+  const missingRunVariables = requiredRunVariables.filter(name => !String(runVariables[name] || '').trim());
+  const selectedHasOutcome = selectedSteps.some(step => ['verify','verify_text'].includes(step.action) || step.expected_type);
+  const canLaunchRun = Boolean(selectedTc) && missingRunVariables.length === 0 && (selectedHasOutcome || allowActionOnly) && !executing;
   const totalRuns = execHistory.length;
   const passed    = execHistory.filter(e => e.status === 'Passed' || e.status === 'passed').length;
   const rate      = totalRuns > 0 ? Math.round((passed / totalRuns) * 100) : 0;
@@ -652,12 +626,12 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
           <div className="space-y-3">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="badge badge-indigo" title={`Full project ID: ${project.id}`}>Project #{String(project.id).slice(0, 8)}</span>
-              <span className="text-slate-600 dark:text-slate-400 text-xs font-medium">{project.app_name || project.name}</span>
+              <span className="text-slate-400 text-xs font-medium">{project.app_name || project.name}</span>
               <span className="badge badge-indigo">🔐 Username &amp; Password{project.face_auth_enabled ? ' + 📷 Face Auth Enabled' : ''}</span>
             </div>
             <h1 className="text-2xl font-black text-white tracking-tight leading-snug">{project.name}</h1>
             <a href={project.app_url} target="_blank" rel="noreferrer"
-               className="inline-flex items-center gap-1.5 text-xs text-slate-600 dark:text-slate-400 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors font-mono font-medium">
+               className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-indigo-300 transition-colors font-mono font-medium">
               <Globe size={13}/>{project.app_url}
             </a>
           </div>
@@ -903,6 +877,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
         )}
 
         {/* PROJECT ASSETS */}
+        {activeTab === 'assets' && <WorkspaceTools project={{...project,id,project_type:'web'}} disabled={executing}/>}
         {activeTab === 'assets' && (
           <div className="w-full space-y-6">
             <div className="card p-6 flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/60 dark:bg-zinc-900/60 border border-slate-800">
@@ -996,13 +971,11 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
           </div>
         )}
 
-        {activeTab === 'runsuite' && <WorkspaceTools project={{...project,id,project_type:'web'}} disabled={executing}/> }
-        {activeTab === 'runsuite' && variableNames(selectedTc?.cached_json || []).length > 0 && <div className="card p-4 space-y-2"><h3 className="text-primary">Runtime test data (not saved in the test)</h3>{variableNames(selectedTc?.cached_json || []).map(name => <label key={name} className="block text-sm text-secondary">{name}<input type="password" autoComplete="off" className="input-field" value={runVariables[name] || ''} onChange={e => setRunVariables({...runVariables, [name]: e.target.value})}/></label>)}</div>}
-        {/* UPLOAD */}
-        {activeTab === 'upload' && <DraftTools project={{...project,id,project_type:'web'}} disabled={executing} onDraft={steps=>{setUploadGroups([{name:'Captured workflow',steps}]);setUploadTcName('Captured workflow');setUploadCommands(describeSteps(steps));}}/>}
+        {activeTab === 'runsuite' && requiredRunVariables.length > 0 && <section className="card p-5 space-y-4 border border-indigo-500/20" aria-label="Required runtime test data"><div><p className="section-label">Required test data</p><h3 className="font-bold mt-1">Enter private values for this run</h3><p className="text-xs text-secondary mt-1">These values are sent only to the local test engine and are not saved in the test case.</p></div><div className="grid sm:grid-cols-2 gap-3">{requiredRunVariables.map(name => <label key={name} className="text-sm font-semibold">{name}<input aria-label={name} type="password" autoComplete="off" className="input-field mt-1" value={runVariables[name] || ''} onChange={e => {setRunVariables({...runVariables,[name]:e.target.value});setRunError('');}} placeholder={`Enter ${name}`}/></label>)}</div>{missingRunVariables.length>0&&<p className="status-panel status-error">Required before running: {missingRunVariables.join(', ')}</p>}</section>}        {/* UPLOAD */}
+        {activeTab === 'upload' && <DraftTools project={{...project,id,project_type:'web'}} disabled={executing} onDraft={steps=>{setUploadGroups([{name:'Captured workflow',steps}]);setUploadTcName('Captured workflow');setUploadCommands(describeSteps(steps));setUploadIssues([]);setUploadReviewAccepted(false);}}/>}
         {activeTab === 'upload' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-7xl mx-auto">
-            <div className="lg:col-span-7 space-y-6">
+          <div className="upload-workspace-grid">
+            <div className="min-w-0 space-y-6">
               <div className="import-guidance"><FileSpreadsheet size={18}/><div><strong>Import one scenario per test case</strong><p>Use the sample CSV for the supported columns. Add an expected outcome, and keep credentials in runtime variables such as {'{{test_password}}'}.</p></div></div>
               <form onSubmit={handleSaveUploadTc} className="card p-6 space-y-5">
                 <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800 pb-4">
@@ -1029,7 +1002,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                 </div>
 
                 <div className="space-y-1.5">
-                  {uploadGroups ? uploadGroups.map((group, i) => <div key={i}><p className="text-primary text-sm">{group.name}</p><TestStepBuilder steps={group.steps} onChange={steps => { const next = uploadGroups.map((g, n) => n === i ? {...g, steps} : g); setUploadGroups(next); setUploadCommands(next.map(g => describeSteps(g.steps)).join('\n')); }}/></div>) : <textarea rows={6} value={uploadCommands} onChange={e => setUploadCommands(e.target.value)}
+                  {uploadGroups ? uploadGroups.map((group, i) => <div key={i}><p className="text-primary text-sm">{group.name}</p><TestStepBuilder steps={group.steps} onChange={steps => { const next = uploadGroups.map((g, n) => n === i ? {...g, steps} : g); setUploadGroups(next); setUploadCommands(next.map(g => describeSteps(g.steps)).join('\n')); setUploadIssues([]);setUploadReviewAccepted(false); }}/></div>) : <textarea rows={6} value={uploadCommands} onChange={e => setUploadCommands(e.target.value)}
                     className="input-field resize-none font-mono text-xs"
                     placeholder={"goto https://example.com/login\nfill Email with test@example.com\nfill Password with TEST_PASSWORD\nclick Sign In\nverify Overview"} />}
                   <button type="button" className="btn-ghost text-xs" onClick={() => { if (uploadCommands && !window.confirm('Replace this draft with an empty structured test?')) return; setUploadGroups([{name: uploadTcName || 'New test', steps: []}]); setUploadCommands(''); }}>New guided test</button>
@@ -1057,6 +1030,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                   <p className="text-xs text-secondary font-semibold">Drop TXT or CSV here (save Excel files as CSV first)</p>
                 </div>
 
+                {uploadIssues.length>0&&<div className="status-panel bg-amber-500/10 text-amber-700 dark:text-amber-200 space-y-2" role="alert"><strong>Review before saving</strong><ul className="list-disc pl-5 space-y-1">{uploadIssues.map((issue,index)=><li key={index}>{issue}</li>)}</ul><label className="flex items-start gap-2 font-semibold"><input aria-label="I reviewed the test definition warnings" type="checkbox" checked={uploadReviewAccepted} onChange={e=>setUploadReviewAccepted(e.target.checked)}/>I reviewed these items and want to save this definition.</label></div>}
                 <div className="pt-2 flex justify-end">
                   <button type="submit" disabled={savingUpload} className="btn-primary">
                     {savingUpload ? 'Parsing & Saving...' : 'Save Test Case'}
@@ -1065,7 +1039,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
               </form>
             </div>
 
-            <div className="lg:col-span-5 space-y-6">
+            <aside className="upload-reference space-y-6">
               <div className="card p-6 space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800 pb-3">
                   <div className="flex items-center gap-2">
@@ -1103,18 +1077,18 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                   <p className="text-xs text-secondary leading-relaxed">Use Expected Type = text_visible and Expected Value = Welcome after Sign In. A successful click alone does not verify login. Keep credentials in runtime variables, not shared CSV files.</p>
                 </div>
               </div>
-            </div>
+            </aside>
           </div>
         )}
 
         {/* RUN SUITE */}
         {activeTab === 'runsuite' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-7xl mx-auto">
-            <div className="lg:col-span-6 space-y-6">
+          <div className="run-workspace-grid">
+            <div className="min-w-0 space-y-6">
               <div className="card p-6 space-y-5">
                 <div className="space-y-1.5">
                   <label className="section-label">Select Test Case</label>
-                  <select value={selectedTestCaseId} onChange={e => setSelectedTestCaseId(e.target.value)}
+                  <select value={selectedTestCaseId} onChange={e => {setSelectedTestCaseId(e.target.value);setAllowActionOnly(false);setRunError('');setRunVariables({});}}
                     className="input-field">
                     {testCases.map(tc => <option key={tc.id} value={tc.id}>{tc.name}</option>)}
                   </select>
@@ -1141,14 +1115,16 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                     <div className="w-11 h-6 bg-slate-200 dark:bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
                   </label>
                 </div>
-                <button onClick={handleLaunchExecution} disabled={executing}
+                <button onClick={handleLaunchExecution} disabled={!canLaunchRun}
                   className="btn-primary w-full justify-center py-3">
                   <Play size={16}/> {executing ? 'Running...' : 'Launch Playwright Execution'}
                 </button>
+                {!selectedHasOutcome&&selectedTc&&<label className="authorization-card"><input aria-label="Authorize action-only diagnostic run" type="checkbox" checked={allowActionOnly} onChange={e=>{setAllowActionOnly(e.target.checked);setRunError('');}}/><span><strong>Run without an outcome check</strong><small>This diagnostic run confirms actions only. Add a verification step for a meaningful pass or fail result.</small></span></label>}
+                {runError&&<p role="alert" className="status-panel status-error">{runError}</p>}
               </div>
             </div>
 
-            <div className="lg:col-span-6 space-y-6">
+            <div className="min-w-0 space-y-6">
               <div className="card p-6 space-y-4">
                 <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800 pb-3">
                   <div className="flex items-center gap-2">
@@ -1224,7 +1200,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
               </button>
             </div>
 
-            <div className="grid grid-cols-4 gap-4">
+            <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
               {/* Card 1: Total Steps */}
               <div className="card p-4">
                 <p className="section-label">Total Steps</p>
@@ -1273,6 +1249,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
               <div className="lg:col-span-7 space-y-3">
                 <span className="section-label block">Execution Steps Audit</span>
                 <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1 scrollbar-thin">
+                  {executionLogs.length===0&&<div className="empty-state"><p>Waiting for the first completed step</p><span>The audit will appear here after execution starts.</span></div>}
                   {executionLogs.map((log, i) => {
                     const isFailed = log.status === 'failed' || log.status === 'Failed';
                     const isSkipped = isSkippedLog(log);
@@ -1398,7 +1375,7 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
           ];
           return (
             <div className="space-y-6 max-w-7xl">
-              <div className="grid grid-cols-4 gap-4">
+              <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
                 <div className="card p-4">
                   <p className="section-label">Total Steps</p>
                   <p className="text-2xl font-black mt-1 text-primary">{resultsLogs.length} Steps</p>
@@ -1630,13 +1607,13 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
                   body { background: white !important; }
                 }
               `}} />
-              
+
               {/* Report Toolbar */}
               <div className="report-toolbar flex items-center justify-between p-4 bg-slate-900 border border-slate-800 rounded-2xl">
                 <button onClick={() => setActiveTab('results')} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition-colors">
                   <ArrowLeft size={13}/> Back
                 </button>
-                
+
                 <div className="flex items-center gap-4">
                   <label className="flex items-center gap-2 text-xs font-semibold text-slate-300 cursor-pointer">
                     <input type="checkbox" checked={includeScreenshots} onChange={e => setIncludeScreenshots(e.target.checked)}
