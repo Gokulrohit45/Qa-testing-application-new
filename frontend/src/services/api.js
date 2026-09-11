@@ -631,8 +631,10 @@ export const AssetService = {
     } catch (e) {}
     const session = await AuthenticationService.getCurrentSession();
     if (!session?.user?.id) return Array.from(merged.values());
-    const { data, error } = await supabase.from('project_assets').select('*').eq('project_id', projectId).eq('user_id', session.user.id);
-    if (!error) (data || []).forEach(asset => merged.set(asset.id, { ...asset, ...merged.get(asset.id) }));
+    try {
+      const data = await fetchCloudAsUser('/cloud/project-assets?project_id=' + encodeURIComponent(projectId), session);
+      (data || []).forEach(asset => merged.set(asset.id, { ...asset, ...merged.get(asset.id) }));
+    } catch (_) { /* Local assets remain available if cloud metadata is temporarily unavailable. */ }
     return Array.from(merged.values());
   },
 

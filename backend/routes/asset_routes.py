@@ -57,13 +57,55 @@ def save_cloud_asset_metadata():
         params={"on_conflict": "id"}, json=record,
         headers=_service_headers("resolution=merge-duplicates,return=representation"), timeout=15,
     )
-    if not response.ok:
+    if response.ok:
+        rows = response.json()
+        return jsonify(rows[0] if rows else record), 200
+
+    workspace = requests.get(
+        f"{SUPABASE_URL.rstrip('/')}/rest/v1/desktop_workspaces",
+        params={"id": f"eq.{record['project_id']}", "user_id": f"eq.{user_id}", "deleted": "eq.false", "select": "payload"},
+        headers=_service_headers(), timeout=15,
+    )
+    workspace_rows = workspace.json() if workspace.ok else []
+    if not workspace_rows:
         logger.error(f"Cloud asset metadata save failed: {response.text}")
         return jsonify({"error": "Cloud asset metadata could not be saved"}), 502
-    rows = response.json()
-    return jsonify(rows[0] if rows else record), 200
+    snapshot = workspace_rows[0].get("payload") or {}
+    assets = [item for item in snapshot.get("project_assets", []) if item.get("id") != record["id"]]
+    snapshot["project_assets"] = [record, *assets]
+    update = requests.patch(
+        f"{SUPABASE_URL.rstrip('/')}/rest/v1/desktop_workspaces",
+        params={"id": f"eq.{record['project_id']}", "user_id": f"eq.{user_id}"},
+        json={"payload": snapshot}, headers=_service_headers("return=minimal"), timeout=15,
+    )
+    if not update.ok:
+        logger.error(f"Desktop workspace asset metadata save failed: {update.text}")
+        return jsonify({"error": "Cloud asset metadata could not be saved"}), 502
+    return jsonify(record), 200
 
 # ── Upload Face Video ──────────────────────────────────────────────────────────
+@asset_bp.route("/api/cloud/project-assets", methods=["GET"])
+def list_cloud_asset_metadata():
+    user_id = _cloud_user_id()
+    if not user_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    project_id = request.args.get("project_id", "")
+    response = requests.get(
+        f"{SUPABASE_URL.rstrip('/')}/rest/v1/project_assets",
+        params={"project_id": f"eq.{project_id}", "user_id": f"eq.{user_id}", "select": "*"},
+        headers=_service_headers(), timeout=15,
+    )
+    rows = response.json() if response.ok else []
+    workspace = requests.get(
+        f"{SUPABASE_URL.rstrip('/')}/rest/v1/desktop_workspaces",
+        params={"id": f"eq.{project_id}", "user_id": f"eq.{user_id}", "deleted": "eq.false", "select": "payload"},
+        headers=_service_headers(), timeout=15,
+    )
+    workspace_rows = workspace.json() if workspace.ok else []
+    embedded = (workspace_rows[0].get("payload") or {}).get("project_assets", []) if workspace_rows else []
+    merged = {item["id"]: item for item in [*rows, *embedded] if item.get("id")}
+    return jsonify(list(merged.values())), 200
+
 @asset_bp.route("/api/upload-video", methods=["POST"])
 def upload_video():
     if "video" not in request.files:
@@ -198,3 +240,4 @@ def get_video(filename):
     return send_from_directory(str(VIDEOS_DIR), filename)
     if Path(file.filename).suffix.lower() not in {".mp4", ".mov", ".webm", ".m4v"}:
         return jsonify({"error": "Unsupported video type"}), 400
+
