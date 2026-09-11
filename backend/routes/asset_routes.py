@@ -1,9 +1,10 @@
 import os
+import requests
 import uuid
 from pathlib import Path
 from flask import Blueprint, request, jsonify, send_from_directory
 from werkzeug.utils import secure_filename
-from config import VIDEOS_DIR, SCREENSHOTS_DIR, DATA_DIR
+from config import VIDEOS_DIR, SCREENSHOTS_DIR, DATA_DIR, SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
 from utils.ffmpeg_helper import convert_mp4_to_y4m
 from utils.logger import logger
 from utils.local_store import list_records, upsert, delete
@@ -12,6 +13,55 @@ asset_bp = Blueprint("asset_bp", __name__)
 
 ASSETS_DIR = DATA_DIR / "project_assets"
 ASSETS_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _cloud_user_id():
+    token = request.headers.get("Authorization", "").removeprefix("Bearer ").strip()
+    if not token or not SUPABASE_URL or not SUPABASE_ANON_KEY:
+        return None
+    response = requests.get(
+        f"{SUPABASE_URL.rstrip('/')}/auth/v1/user",
+        headers={"apikey": SUPABASE_ANON_KEY, "Authorization": f"Bearer {token}"},
+        timeout=10,
+    )
+    if not response.ok:
+        return None
+    return response.json().get("id")
+
+def _service_headers(prefer=None):
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json",
+    }
+    if prefer:
+        headers["Prefer"] = prefer
+    return headers
+
+@asset_bp.route("/api/cloud/project-assets", methods=["POST"])
+def save_cloud_asset_metadata():
+    user_id = _cloud_user_id()
+    if not user_id:
+        return jsonify({"error": "Unauthorized"}), 401
+    if not SUPABASE_SERVICE_ROLE_KEY:
+        return jsonify({"error": "Cloud asset service is not configured"}), 503
+    payload = request.get_json(silent=True) or {}
+    if payload.get("user_id") != user_id:
+        return jsonify({"error": "Asset owner does not match the signed-in account"}), 403
+    allowed = {"id", "project_id", "user_id", "filename", "storage_path", "size_bytes", "content_type", "created_at"}
+    record = {key: payload[key] for key in allowed if key in payload}
+    if not all(record.get(key) for key in ("id", "project_id", "filename", "storage_path")):
+        return jsonify({"error": "Incomplete asset metadata"}), 400
+    response = requests.post(
+        f"{SUPABASE_URL.rstrip('/')}/rest/v1/project_assets",
+        params={"on_conflict": "id"}, json=record,
+        headers=_service_headers("resolution=merge-duplicates,return=representation"), timeout=15,
+    )
+    if not response.ok:
+        logger.error(f"Cloud asset metadata save failed: {response.text}")
+        return jsonify({"error": "Cloud asset metadata could not be saved"}), 502
+    rows = response.json()
+    return jsonify(rows[0] if rows else record), 200
 
 # ── Upload Face Video ──────────────────────────────────────────────────────────
 @asset_bp.route("/api/upload-video", methods=["POST"])

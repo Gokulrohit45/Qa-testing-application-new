@@ -22,6 +22,13 @@ async function fetchCloud(endpoint, options = {}) {
   return requestJson(`${CLOUD_API_URL}${endpoint}`, options, { 'Content-Type': 'application/json' });
 }
 
+async function fetchCloudAsUser(endpoint, session, options = {}) {
+  return requestJson(CLOUD_API_URL + endpoint, options, {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer ' + session.access_token
+  });
+}
+
 // Normalized User Id extractor
 export function getNormalizedUserId(session) {
   if (!session) return 'user_offline';
@@ -607,8 +614,12 @@ export const AssetService = {
       storage_path: storagePath, size_bytes: file.size || 0,
       content_type: file.type || 'application/octet-stream', created_at: local.created_at || new Date().toISOString()
     };
-    const { error: metadataError } = await supabase.from('project_assets').upsert([metadata]);
-    if (metadataError) throw new Error(`Cloud asset metadata save failed: ${metadataError.message}`);
+    try {
+      await fetchCloudAsUser('/cloud/project-assets', session, { method: 'POST', body: JSON.stringify(metadata) });
+    } catch (error) {
+      await supabase.storage.from('project-assets').remove([storagePath]);
+      throw new Error('Cloud asset metadata save failed: ' + error.message);
+    }
     return { ...local, ...metadata };
   },
 
