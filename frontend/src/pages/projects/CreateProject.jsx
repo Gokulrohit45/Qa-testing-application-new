@@ -23,15 +23,15 @@ export default function CreateProject({ projects, setProjects }) {
       project_type: projectType,
       app_url: projectType === 'desktop' ? null : form.appUrl.startsWith('http') ? form.appUrl : `https://${form.appUrl}`,
       description: form.description,
-      face_auth_enabled: projectType === 'web' && faceAuthEnabled
+      face_auth_enabled: faceAuthEnabled
     };
 
     const created = await setProjects(newProject);
 
-    if (created?.id && faceVideoFile && projectType === 'web') {
+    if (created?.id && faceVideoFile) {
       try {
-        const uploaded = await AssetService.uploadVideo(faceVideoFile, created.id);
-        await ProjectService.updateProject(created.id, { video_file_path: uploaded.y4m_path });
+        const uploaded = await AssetService.uploadFaceVideo(faceVideoFile, created.id);
+        await ProjectService.updateProject(created.id, { video_file_path: uploaded.y4m_path, face_video_storage_path: uploaded.storage_path });
       } catch (err) {
         alert(`Project created, but face video preparation failed: ${err.message}`);
       }
@@ -62,7 +62,7 @@ export default function CreateProject({ projects, setProjects }) {
             <option value="desktop">Windows desktop — local preview</option>
           </select>
         </label>
-        {projectType === 'desktop' && <p className="text-secondary text-sm">Local-only preview. Open your test application, then select its window in the project. Requires the opt-in desktop engine; cloud sync is not enabled yet.</p>}
+        {projectType === 'desktop' && <p className="text-secondary text-sm">Open your test application, then select and inspect its window from the project. Tests, assets, and settings synchronize with your account.</p>}
         {error && <p role="alert" className="text-red-600 dark:text-red-400">{error}</p>}
         <div className="space-y-1.5">
           <label className="section-label">Project Name</label>
@@ -100,13 +100,13 @@ export default function CreateProject({ projects, setProjects }) {
         </div>
 
         {/* Authentication Configuration Section */}
-        {projectType === 'web' && <div className="p-4 rounded-xl border border-indigo-500/20 bg-slate-900 text-white space-y-3">
+        <div className="p-4 rounded-xl border border-indigo-500/20 bg-slate-900 text-white space-y-3">
           <div className="flex items-center justify-between">
             <div className="space-y-0.5">
               <p className="font-bold text-sm text-indigo-400 flex items-center gap-1.5">
                 <span>🔐</span> Authentication Configuration
               </p>
-              <p className="text-[11px] text-slate-400">Configure optional Face Verification for 2FA logins.</p>
+              <p className="text-[11px] text-slate-400">Configure optional Face Verification for supported authentication flows.</p>
             </div>
             <button
               type="button"
@@ -120,21 +120,21 @@ export default function CreateProject({ projects, setProjects }) {
 
           <div className="text-[11px] text-slate-400 leading-relaxed bg-slate-950/60 p-3 rounded-lg border border-slate-800 space-y-1">
             <p>• <strong>Username/Email &amp; Password:</strong> Supplied directly inside your test case commands (e.g. <code className="text-amber-300 font-mono">fill Email...</code>, <code className="text-amber-300 font-mono">fill Password...</code>).</p>
-            <p>• <strong>Biometric Face Verification:</strong> Playwright streams virtual webcam video for face recognition logins.</p>
+            <p>• <strong>Biometric Face Verification:</strong> The local test engine provides the prepared virtual-camera video during supported face-recognition logins.</p>
           </div>
 
           {faceAuthEnabled && (
             <div className="pt-2 border-t border-slate-800 space-y-2">
-              <p className="text-xs font-semibold text-indigo-300">📷 Upload Face Verification Video (.mp4 / .y4m)</p>
+              <p className="text-xs font-semibold text-indigo-300">📷 Upload Face Verification Video (.mp4)</p>
               <label className="border-2 border-dashed border-indigo-500/40 rounded-xl p-4 flex flex-col items-center justify-center cursor-pointer hover:bg-indigo-950/30 transition-all">
                 <Upload size={20} className="text-indigo-400 mb-1"/>
                 <span className="text-xs font-bold text-indigo-200">
                   {faceVideoFile ? `Selected: ${faceVideoFile.name}` : 'Click to select face verification video'}
                 </span>
-                <span className="text-[10px] text-slate-400 mt-0.5">Supported formats: MP4, Y4M</span>
+                <span className="text-[10px] text-slate-400 mt-0.5">Supported format: MP4</span>
                 <input
                   type="file"
-                  accept="video/mp4,video/y4m"
+                  accept="video/mp4"
                   onChange={e => setFaceVideoFile(e.target.files[0] || null)}
                   className="hidden"
                 />
@@ -143,7 +143,6 @@ export default function CreateProject({ projects, setProjects }) {
           )}
         </div>
 
-        }
         <div className="flex justify-end pt-2">
           <button type="submit" disabled={submitting} className="btn-primary px-6">
             <Zap size={15}/> {submitting ? 'Creating...' : 'Create Project'}
@@ -153,3 +152,6 @@ export default function CreateProject({ projects, setProjects }) {
     </div>
   );
 }
+
+
+

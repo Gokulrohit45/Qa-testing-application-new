@@ -73,6 +73,11 @@ class StorageTests(unittest.TestCase):
         self.assertEqual(local_store.get('desktop_test', 'second')['name'], 'Renamed')
         self.assertEqual(local_store.get('desktop_test', 'p')['name'], 'Saved desktop test')
 
+    def test_duplicate_names_are_rejected_case_insensitively(self):
+        data = {'steps': [{'action': 'click', 'target': {'name': 'Test'}}]}
+        desktop_storage.save_test('p', dict(data, name='Calculator smoke'), 'first')
+        with self.assertRaisesRegex(ValueError, 'already exists'):
+            desktop_storage.save_test('p', dict(data, name=' calculator SMOKE '), 'second')
     def test_cross_project_overwrite_and_bad_names_refused(self):
         data = {'steps': [{'action': 'click', 'target': {'name': 'Test'}}]}
         desktop_storage.save_test('p', data, 'test')

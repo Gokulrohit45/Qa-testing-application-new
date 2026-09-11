@@ -15,7 +15,23 @@ _ACTIVE=set();_LOCK=threading.Lock()
 MAX_VIDEO_MB=100
 MAX_VIDEO_BYTES=MAX_VIDEO_MB*1024*1024
 INLINE_VIDEO_BYTES=15*1024*1024
-ACTION_ALIASES={'navigate':'goto','navigate_to':'goto','open':'goto','visit':'goto','type':'fill','input':'fill','enter':'fill','press':'click','tap':'click','assert':'verify','check_text':'verify','verify_text':'verify'}
+ACTION_ALIASES={
+    'navigate':'goto','navigate_to':'goto','open':'goto','visit':'goto',
+    'type':'fill','type_text':'fill','input':'fill','input_text':'fill','enter_text':'fill',
+    'press':'click','press_button':'click','tap':'click','tap_button':'click','click_button':'click',
+    'choose':'select','select_item':'select',
+    'assert':'verify','assert_text':'verify','check_text':'verify','verify_text':'verify',
+    'verify_result':'verify_text','check_result':'verify_text','observe_result':'verify_text',
+}
+
+def normalize_desktop_action(action,step):
+    """Map common multimodal wording onto the intentionally small UIA contract."""
+    canonical=ACTION_ALIASES.get(action,action)
+    if canonical=='verify':
+        return 'verify_text' if str(step.get('value') or '').strip() else 'verify_visible'
+    if canonical in {'clear','clear_display','calculate','equals','submit'}:
+        return 'click'
+    return canonical
 
 def parse_video_candidate(text):
     value=str(text or '').strip()
@@ -48,8 +64,22 @@ def validate_draft(candidate,project_type):
         raise ValueError('Video analysis did not return a usable test draft')
     steps=candidate['steps']
     if project_type=='desktop':
-        validate_desktop(steps)
-        steps=[{key:step[key] for key in ('action','target','value','timeout_seconds') if key in step} for step in steps]
+        allowed={'click','fill','verify_text','verify_visible','verify_enabled','verify_checked','check','uncheck','select','expand','collapse'}
+        repaired=[]
+        for step in steps:
+            if not isinstance(step,dict):raise ValueError('Draft contains an invalid desktop step')
+            step=dict(step)
+            step['action']=normalize_desktop_action(str(step.get('action') or ''),step)
+            if step['action'] not in allowed:raise ValueError(f"Draft contains unsupported desktop action '{step['action'] or 'missing'}'")
+            target=step.get('target')
+            if isinstance(target,str):target={'name':target.strip()}
+            elif isinstance(target,dict):target={key:str(value).strip() for key,value in target.items() if key in {'name','automation_id','control_type'} and str(value).strip()}
+            else:target={}
+            if not target:target={'name':'Unresolved control'}
+            value=step.get('value','')
+            if step['action'] in {'fill','verify_text'} and not isinstance(value,str):value=str(value or '')
+            repaired.append({'action':step['action'],'target':target,'value':value,'timeout_seconds':10,'needs_mapping':True})
+        steps=repaired
     else:
         # Repair the unambiguous form where a multimodal response puts a navigation URL in value.
         steps = [dict(step, target=step.get('value', ''), value='')
@@ -158,3 +188,4 @@ def create_draft():
     except requests.RequestException:return jsonify(error='Video analysis timed out. Please retry'),504
     finally:
         with _LOCK:_ACTIVE.discard(user)
+

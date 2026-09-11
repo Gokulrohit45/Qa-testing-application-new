@@ -21,7 +21,7 @@ ADD COLUMN IF NOT EXISTS face_video_storage_path TEXT;
 -- 2. TEST CASES TABLE
 CREATE TABLE IF NOT EXISTS public.test_cases (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-    project_id UUID REFERENCES public.projects(id) ON DELETE CASCADE NOT NULL,
+    project_id UUID NOT NULL,
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
     name TEXT NOT NULL,
     type TEXT DEFAULT 'txt' NOT NULL, -- txt, csv, xlsx
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS public.test_cases (
 -- 3. EXECUTIONS (RUNS) TABLE
 CREATE TABLE IF NOT EXISTS public.executions (
     id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
-    project_id UUID REFERENCES public.projects(id) ON DELETE CASCADE NOT NULL,
+    project_id UUID NOT NULL,
     test_id UUID REFERENCES public.test_cases(id) ON DELETE CASCADE,
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
     status TEXT NOT NULL,             -- 'Passed', 'Failed', 'Running', 'Cancelled'
@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS public.telemetry_spans (
 -- 6. PRIVATE PROJECT ASSET METADATA
 CREATE TABLE IF NOT EXISTS public.project_assets (
     id UUID PRIMARY KEY,
-    project_id UUID REFERENCES public.projects(id) ON DELETE CASCADE NOT NULL,
+    project_id UUID NOT NULL,
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
     filename TEXT NOT NULL,
     storage_path TEXT NOT NULL,
@@ -203,3 +203,4 @@ WITH CHECK (EXISTS (SELECT 1 FROM public.executions e WHERE e.id = execution_id 
 CREATE POLICY "Users manage their project assets" ON public.project_assets FOR ALL TO authenticated
 USING (auth.uid() = user_id AND EXISTS (SELECT 1 FROM public.projects p WHERE p.id = project_id AND p.user_id = auth.uid()))
 WITH CHECK (auth.uid() = user_id AND EXISTS (SELECT 1 FROM public.projects p WHERE p.id = project_id AND p.user_id = auth.uid()));
+

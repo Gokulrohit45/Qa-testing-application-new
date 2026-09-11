@@ -107,19 +107,22 @@ def saved_test(project_id):
 
 
 @desktop_bp.route('/api/desktop/projects/<project_id>/tests', methods=['GET', 'POST'])
-@desktop_bp.route('/api/desktop/projects/<project_id>/tests/<test_id>', methods=['PUT'])
+@desktop_bp.route('/api/desktop/projects/<project_id>/tests/<test_id>', methods=['PUT', 'DELETE'])
 def named_tests(project_id, test_id=None):
     try:
         desktop_storage.project(project_id)
         if request.method == 'GET':
             records = local_store.list_records('desktop_test', project_id=project_id)
             return jsonify([dict(r, name=r.get('name', 'Saved desktop test')) for r in records])
-        data = request.get_json(silent=True)
-        if not isinstance(data, dict): raise ValueError('An object is required')
         if test_id:
             existing = local_store.get('desktop_test', test_id)
             if not existing or existing.get('project_id') != project_id:
                 return jsonify(error='Test not found in this project'), 404
+        if request.method == 'DELETE':
+            local_store.delete('desktop_test', test_id)
+            return jsonify(success=True)
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict): raise ValueError('An object is required')
         return jsonify(desktop_storage.save_test(project_id, data, test_id or str(uuid.uuid4())))
     except ValueError as error:
         return jsonify(error=str(error)), 400

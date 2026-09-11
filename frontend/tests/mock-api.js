@@ -27,6 +27,7 @@ export const DesktopService = {
   saveSuite: async (_, test_ids, continue_on_failure) => {const data={test_ids,continue_on_failure}; localStorage.setItem('desktop-suite', JSON.stringify(data)); return data;},
   listTests: async () => JSON.parse(localStorage.getItem('desktop-tests') || '[]'),
   saveNamedTest: async (_, id, name, steps) => {const saved = {id:id || crypto.randomUUID(),name,steps}; const all=JSON.parse(localStorage.getItem('desktop-tests') || '[]'); localStorage.setItem('desktop-tests', JSON.stringify([saved,...all.filter(t=>t.id!==saved.id)])); return saved;},
+  deleteTest: async (_,id) => {const all=JSON.parse(localStorage.getItem('desktop-tests')||'[]');localStorage.setItem('desktop-tests',JSON.stringify(all.filter(t=>t.id!==id)));return {success:true};},
   loadTest: async () => ({steps: JSON.parse(localStorage.getItem('desktop-test') || '[]')}),
   saveTest: async (_, steps) => {localStorage.setItem('desktop-test', JSON.stringify(steps)); return {steps};},
   history: async () => [],

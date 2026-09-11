@@ -511,8 +511,9 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
   };
 
   const handleVideoUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length) return;
     setVideoUploading(true);
     try {
       const res = await AssetService.uploadFaceVideo(file, id);
@@ -529,12 +530,14 @@ export default function ProjectDetails({ projects = [], onDeleteProject, onSelec
   };
 
   const handleAssetUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length) return;
     setAssetUploading(true);
     try {
-      const res = await AssetService.uploadAsset(file, id);
-      setAssets(prev => [res, ...prev]);
+      const uploaded = [];
+      for (const file of files) uploaded.push(await AssetService.uploadAsset(file, id));
+      setAssets(prev => [...uploaded.reverse(), ...prev]);
     } catch (err) { alert('Asset upload failed: ' + err.message); }
     finally { setAssetUploading(false); }
   };

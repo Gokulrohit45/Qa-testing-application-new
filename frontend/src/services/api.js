@@ -305,6 +305,7 @@ export const DesktopService = {
   saveSuite: (id, test_ids, continue_on_failure) => fetchLocal(`/desktop/projects/${encodeURIComponent(id)}/suite`, {method:'PUT', body:JSON.stringify({test_ids,continue_on_failure})}),
   listTests: id => fetchLocal(`/desktop/projects/${encodeURIComponent(id)}/tests`),
   saveNamedTest: (id, testId, name, steps) => fetchLocal(`/desktop/projects/${encodeURIComponent(id)}/tests${testId ? '/' + encodeURIComponent(testId) : ''}`, {method: testId ? 'PUT' : 'POST', body: JSON.stringify({name, steps})}),
+  deleteTest: (id, testId) => fetchLocal(`/desktop/projects/${encodeURIComponent(id)}/tests/${encodeURIComponent(testId)}`, {method: 'DELETE'}),
   loadTest: id => fetchLocal(`/desktop/projects/${encodeURIComponent(id)}/test`),
   saveTest: (id, steps) => fetchLocal(`/desktop/projects/${encodeURIComponent(id)}/test`, { method: 'PUT', body: JSON.stringify({ steps }) }),
   history: id => fetchLocal(`/desktop/projects/${encodeURIComponent(id)}/history`),

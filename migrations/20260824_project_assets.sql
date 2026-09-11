@@ -1,7 +1,7 @@
 -- Private cross-device project asset synchronization.
 CREATE TABLE IF NOT EXISTS public.project_assets (
     id UUID PRIMARY KEY,
-    project_id UUID REFERENCES public.projects(id) ON DELETE CASCADE NOT NULL,
+    project_id UUID NOT NULL,
     user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE NOT NULL,
     filename TEXT NOT NULL,
     storage_path TEXT NOT NULL,
@@ -15,8 +15,18 @@ ALTER TABLE public.project_assets ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Users manage their project assets" ON public.project_assets;
 CREATE POLICY "Users manage their project assets" ON public.project_assets FOR ALL TO authenticated
-USING (auth.uid() = user_id AND EXISTS (SELECT 1 FROM public.projects p WHERE p.id = project_id AND p.user_id = auth.uid()))
-WITH CHECK (auth.uid() = user_id AND EXISTS (SELECT 1 FROM public.projects p WHERE p.id = project_id AND p.user_id = auth.uid()));
+USING (
+  auth.uid() = user_id AND (
+    EXISTS (SELECT 1 FROM public.projects p WHERE p.id = project_id AND p.user_id = auth.uid())
+    OR EXISTS (SELECT 1 FROM public.desktop_workspaces d WHERE d.id = project_id AND d.user_id = auth.uid() AND NOT d.deleted)
+  )
+)
+WITH CHECK (
+  auth.uid() = user_id AND (
+    EXISTS (SELECT 1 FROM public.projects p WHERE p.id = project_id AND p.user_id = auth.uid())
+    OR EXISTS (SELECT 1 FROM public.desktop_workspaces d WHERE d.id = project_id AND d.user_id = auth.uid() AND NOT d.deleted)
+  )
+);
 
 INSERT INTO storage.buckets (id, name, public)
 VALUES ('project-assets', 'project-assets', false)
@@ -35,3 +45,4 @@ USING (bucket_id = 'project-assets' AND (storage.foldername(name))[1] = auth.uid
 WITH CHECK (bucket_id = 'project-assets' AND (storage.foldername(name))[1] = auth.uid()::text);
 CREATE POLICY "Users delete their project assets" ON storage.objects FOR DELETE TO authenticated
 USING (bucket_id = 'project-assets' AND (storage.foldername(name))[1] = auth.uid()::text);
+

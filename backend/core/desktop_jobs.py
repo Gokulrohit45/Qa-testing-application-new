@@ -40,11 +40,22 @@ def worker(kind, payload, output):
     try:
         from pywinauto import Desktop
         if kind == 'windows':
-            windows = []
+            windows, seen = [], set()
+            ignored_titles = {'Program Manager', 'Desktop', 'Taskbar'}
             for w in Desktop(backend='uia').windows():
-                if w.is_visible() and w.window_text():
-                    windows.append(dict(handle=w.handle, process_id=w.process_id(), title=w.window_text()))
-            output.put(('done', {'windows': windows[:100]}))
+                title = str(w.window_text() or '').strip()
+                if not w.is_visible() or not title or title in ignored_titles or 'QA-AI Autonomous Testing Platform' in title:
+                    continue
+                process_id, handle = w.process_id(), w.handle
+                identity = (process_id, title.casefold())
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                parts = [part.strip() for part in title.replace(' — ', ' - ').split(' - ') if part.strip()]
+                app_name = parts[-1] if len(parts) > 1 else parts[0]
+                windows.append(dict(handle=handle, process_id=process_id, title=title, app_name=app_name))
+            windows.sort(key=lambda item: (item['app_name'].casefold(), item['title'].casefold()))
+            output.put(('done', {'windows': windows[:40]}))
             return
         adapter = WindowsAdapter(payload['handle'], payload['process_id'])
         if adapter.window.window_text() != payload['title']:

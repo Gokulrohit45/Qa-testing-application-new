@@ -48,6 +48,8 @@ class DraftTests(unittest.TestCase):
         self.assertTrue(result['requires_review'])
         self.assertNotIn('private',json.dumps(result))
         self.assertNotIn('handle',result['steps'][0])
+        self.assertTrue(result['steps'][0]['needs_mapping'])
+        self.assertEqual(result['steps'][0]['target']['name'],'Password')
     def test_ai_draft_repairs_unambiguous_navigation_value(self):
         result=validate_draft({'steps':[{'action':'goto','target':'url','value':'https://example.com'}]},'web')
         self.assertEqual(result['steps'][0],{'action':'goto','target':'https://example.com','value':''})
@@ -65,6 +67,16 @@ class DraftTests(unittest.TestCase):
             result=analyze_video(b'small','video/mp4','web','https://example.com','gemini-fixture')
         self.assertTrue(result['requires_review'])
         self.assertEqual(post.call_count,2)
+    def test_desktop_video_candidate_normalizes_safe_action_aliases(self):
+        candidate=parse_video_candidate(json.dumps({'steps':[
+            {'action':'press_button','target':{'name':'Seven','control_type':'Button'},'value':''},
+            {'action':'verify_result','target':{'name':'Display','control_type':'Text'},'value':15},
+            {'action':'clear_display','target':{'name':'Clear','control_type':'Button'},'value':''},
+        ]}))
+        result=validate_draft(candidate,'desktop')
+        self.assertEqual([step['action'] for step in result['steps']],['click','verify_text','click'])
+        self.assertEqual(result['steps'][1]['value'],'15')
+        self.assertTrue(all(step['needs_mapping'] for step in result['steps']))
     def test_ai_draft_rejects_invalid_actions(self):
         with self.assertRaises(ValueError):validate_draft({'steps':[{'action':'shell','target':{'name':'x'}}]},'desktop')
 
@@ -110,3 +122,4 @@ class RecorderBrowserTests(unittest.TestCase):
             finally:browser.close()
 
 if __name__=='__main__':unittest.main()
+

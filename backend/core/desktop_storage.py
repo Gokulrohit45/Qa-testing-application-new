@@ -24,6 +24,10 @@ def save_test(project_id, data, test_id=None):
     name = data.get('name', (existing or {}).get('name', 'Saved desktop test'))
     if not isinstance(name, str) or not name.strip() or len(name.strip()) > 120:
         raise ValueError('Test name must contain 1 to 120 characters')
+    duplicate = next((item for item in local_store.list_records('desktop_test', project_id=project_id)
+                      if item.get('id') != record_id and str(item.get('name', '')).strip().casefold() == name.strip().casefold()), None)
+    if duplicate:
+        raise ValueError('A desktop test with this name already exists')
     # Deliberately exclude window handles, process IDs and authorization.
     clean = [{k: s[k] for k in ('action', 'target', 'value', 'timeout_seconds') if k in s} for s in steps]
     return local_store.upsert('desktop_test', {

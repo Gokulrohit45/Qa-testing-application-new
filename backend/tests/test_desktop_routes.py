@@ -76,3 +76,14 @@ class DesktopRoutesTests(unittest.TestCase):
             removed = self.client.delete(f'/api/desktop/projects/p/suites/{suite_id}', headers=self.headers)
         self.assertEqual(updated.get_json()['name'], 'Updated')
         self.assertEqual(removed.status_code, 200)
+
+    @patch('core.desktop_jobs.available', return_value=True)
+    @patch('core.desktop_storage.project', return_value={'user_id':'u'})
+    def test_named_test_delete_is_project_scoped(self, _project, _available):
+        with patch('routes.desktop_routes.local_store.get', return_value={'id':'test','project_id':'p'}), patch('routes.desktop_routes.local_store.delete') as delete:
+            response = self.client.delete('/api/desktop/projects/p/tests/test', headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        delete.assert_called_once_with('desktop_test', 'test')
+        with patch('routes.desktop_routes.local_store.get', return_value={'id':'test','project_id':'other'}):
+            response = self.client.delete('/api/desktop/projects/p/tests/test', headers=self.headers)
+        self.assertEqual(response.status_code, 404)
