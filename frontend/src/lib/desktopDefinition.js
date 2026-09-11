@@ -5,17 +5,35 @@ export const DESKTOP_SAMPLE_CSV = 'Test Case,Step,Action,Control Name,Automation
 
 const clean = value => String(value ?? '').trim();
 const targetKey = target => JSON.stringify({name:clean(target?.name).toLowerCase(),automation_id:clean(target?.automation_id).toLowerCase(),control_type:clean(target?.control_type).toLowerCase()});
-
+const normalized = value => clean(value).toLowerCase().replace(/[^a-z0-9]+/g,'');
+const GENERIC_TARGETS = new Set(['button','text','control','pane','window','unresolvedcontrol']);
+const CALCULATOR_ALIASES = {
+  zero:'num0button',one:'num1button',two:'num2button',three:'num3button',four:'num4button',five:'num5button',six:'num6button',seven:'num7button',eight:'num8button',nine:'num9button',
+  '0':'num0button','1':'num1button','2':'num2button','3':'num3button','4':'num4button','5':'num5button','6':'num6button','7':'num7button','8':'num8button','9':'num9button',
+  plus:'plusbutton',add:'plusbutton',addition:'plusbutton',minus:'minusbutton',subtract:'minusbutton',subtraction:'minusbutton',
+  multiply:'multiplybutton',times:'multiplybutton',multiplication:'multiplybutton',divide:'dividebutton',division:'dividebutton',
+  equals:'equalbutton',equal:'equalbutton',clear:'clearbutton',c:'clearbutton',clearentry:'clearentrybutton',ce:'clearentrybutton',
+  decimal:'decimalseparatorbutton',dot:'decimalseparatorbutton',percent:'percentbutton',squareroot:'squarerootbutton',square:'xpower2button',
+  reciprocal:'invertbutton',negate:'negatebutton',plusminus:'negatebutton',display:'calculatorresults',result:'calculatorresults',results:'calculatorresults',calculatorresult:'calculatorresults',calculatorresults:'calculatorresults'
+};
+function controlValues(control){return [control.label,control.target?.name,control.target?.automation_id].map(normalized).filter(Boolean);}
+function intendedKey(step,target){
+  const values=[target?.automation_id,target?.name];
+  if(step.action==='click'||step.action==='select')values.push(step.value);
+  for(const value of values){const key=normalized(value);if(CALCULATOR_ALIASES[key])return CALCULATOR_ALIASES[key];}
+  return '';
+}
 export function matchDesktopSteps(steps, controls=[]) {
   return steps.map(step => {
     const target=step.target && typeof step.target==='object' ? step.target : {name:clean(step.target)};
     const exact=controls.find(control=>targetKey(control.target)===targetKey(target));
-    const label=clean(target.name||target.automation_id).toLowerCase();
-    const candidates=controls.filter(control=>{
-      const values=[control.label,control.target?.name,control.target?.automation_id].map(value=>clean(value).toLowerCase());
-      return label && values.some(value=>value===label);
-    });
-    const matched=exact || (candidates.length===1?candidates[0]:null);
+    const requested=[target.automation_id,target.name].map(normalized).filter(value=>value&&!GENERIC_TARGETS.has(value));
+    const candidates=controls.filter(control=>requested.some(value=>controlValues(control).includes(value)));
+    const alias=intendedKey(step,target);
+    const aliasCandidates=alias?controls.filter(control=>controlValues(control).includes(alias)):[];
+    const textCandidates=step.action.startsWith('verify_')&&GENERIC_TARGETS.has(normalized(target.name))
+      ?controls.filter(control=>controlValues(control).includes('calculatorresults')):[];
+    const matched=exact || (candidates.length===1?candidates[0]:null) || (aliasCandidates.length===1?aliasCandidates[0]:null) || (textCandidates.length===1?textCandidates[0]:null);
     return {...step,target:matched?.target||target,value:clean(step.value),needs_mapping:!matched};
   });
 }

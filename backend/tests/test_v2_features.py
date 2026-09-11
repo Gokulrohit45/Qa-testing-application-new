@@ -77,6 +77,10 @@ class DraftTests(unittest.TestCase):
         self.assertEqual([step['action'] for step in result['steps']],['click','verify_text','click'])
         self.assertEqual(result['steps'][1]['value'],'15')
         self.assertTrue(all(step['needs_mapping'] for step in result['steps']))
+    def test_ai_draft_rejects_generic_desktop_targets(self):
+        with self.assertRaisesRegex(ValueError,'generic desktop target'):
+            validate_draft({'steps':[{'action':'click','target':{'name':'Button','control_type':'Button'},'value':'Seven'}]},'desktop')
+
     def test_ai_draft_rejects_invalid_actions(self):
         with self.assertRaises(ValueError):validate_draft({'steps':[{'action':'shell','target':{'name':'x'}}]},'desktop')
 

@@ -4,6 +4,7 @@ import { parseDesktopCsv, matchDesktopSteps } from './desktopDefinition.js';
 
 const controls=[
   {label:'Two',target:{control_type:'Button',automation_id:'num2Button',name:'Two'}},
+  {label:'Plus',target:{control_type:'Button',automation_id:'plusButton',name:'Plus'}},
   {label:'CalculatorResults',target:{control_type:'Text',automation_id:'CalculatorResults'}},
 ];
 
@@ -14,6 +15,16 @@ test('desktop CSV creates multiple ordered test cases and maps inspected control
   assert.deepEqual(groups.map(group=>group.name),['Addition','Visibility']);
   assert.equal(groups[0].steps[0].needs_mapping,false);
   assert.equal(groups[0].steps[1].value,'7');
+});
+
+test('video drafts map Calculator aliases and the unique result display',()=>{
+  const mapped=matchDesktopSteps([
+    {action:'click',target:{name:'2',control_type:'Button'},value:''},
+    {action:'click',target:{name:'Button',control_type:'Button'},value:'Add'},
+    {action:'verify_text',target:{name:'Text',control_type:'Text'},value:'7'},
+  ],controls);
+  assert.deepEqual(mapped.map(step=>step.target.automation_id),['num2Button','plusButton','CalculatorResults']);
+  assert.ok(mapped.every(step=>!step.needs_mapping));
 });
 
 test('desktop CSV keeps a valid unresolved target for explicit review',()=>{

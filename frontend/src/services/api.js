@@ -706,7 +706,7 @@ export const VideoDraftService={
   async create(project,file){
     const session=await AuthenticationService.getCurrentSession();if(!session?.access_token)throw new Error('Sign in before analyzing a recording');
     if(file.size>100*1024*1024)throw new Error('Choose a test recording no larger than 100 MB');
-    const body=new FormData();body.append('video',file);body.append('consent','true');body.append('project_type',project.project_type||'web');body.append('url',project.app_url||'');
+    const body=new FormData();body.append('video',file);body.append('consent','true');body.append('project_type',project.project_type||'web');body.append('url',project.app_url||'');body.append('application_name',project.app_name||project.name||'');
     return requestJson(`${CLOUD_API_URL}/video-drafts`,{method:'POST',headers:{Authorization:`Bearer ${session.access_token}`},body,timeoutMs:300000});
   }
 };
