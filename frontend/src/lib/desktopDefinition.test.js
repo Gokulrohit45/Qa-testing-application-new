@@ -5,6 +5,9 @@ import { parseDesktopCsv, matchDesktopSteps } from './desktopDefinition.js';
 const controls=[
   {label:'Two',target:{control_type:'Button',automation_id:'num2Button',name:'Two'}},
   {label:'Plus',target:{control_type:'Button',automation_id:'plusButton',name:'Plus'}},
+  {label:'Minus',target:{control_type:'Button',automation_id:'minusButton',name:'Minus'}},
+  {label:'Multiply by',target:{control_type:'Button',automation_id:'multiplyButton',name:'Multiply by'}},
+  {label:'Equals',target:{control_type:'Button',automation_id:'equalButton',name:'Equals'}},
   {label:'CalculatorResults',target:{control_type:'Text',automation_id:'CalculatorResults'}},
 ];
 
@@ -24,6 +27,12 @@ test('video drafts map Calculator aliases and the unique result display',()=>{
     {action:'verify_text',target:{name:'Text',control_type:'Text'},value:'7'},
   ],controls);
   assert.deepEqual(mapped.map(step=>step.target.automation_id),['num2Button','plusButton','CalculatorResults']);
+  assert.ok(mapped.every(step=>!step.needs_mapping));
+});
+
+test('video drafts map Calculator operator symbols without manual selection',()=>{
+  const mapped=matchDesktopSteps(['+','-','×','='].map(value=>({action:'click',target:{name:value,control_type:'Button'},value})),controls);
+  assert.deepEqual(mapped.map(step=>step.target.automation_id),['plusButton','minusButton','multiplyButton','equalButton']);
   assert.ok(mapped.every(step=>!step.needs_mapping));
 });
 

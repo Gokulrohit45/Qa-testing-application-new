@@ -7,6 +7,7 @@ const clean = value => String(value ?? '').trim();
 const targetKey = target => JSON.stringify({name:clean(target?.name).toLowerCase(),automation_id:clean(target?.automation_id).toLowerCase(),control_type:clean(target?.control_type).toLowerCase()});
 const normalized = value => clean(value).toLowerCase().replace(/[^a-z0-9]+/g,'');
 const GENERIC_TARGETS = new Set(['button','text','control','pane','window','unresolvedcontrol']);
+const SYMBOL_ALIASES = {'+':'plusbutton','-':'minusbutton','−':'minusbutton','x':'multiplybutton','×':'multiplybutton','*':'multiplybutton','÷':'dividebutton','/':'dividebutton','=':'equalbutton','%':'percentbutton','.':'decimalseparatorbutton','±':'negatebutton'};
 const CALCULATOR_ALIASES = {
   zero:'num0button',one:'num1button',two:'num2button',three:'num3button',four:'num4button',five:'num5button',six:'num6button',seven:'num7button',eight:'num8button',nine:'num9button',
   '0':'num0button','1':'num1button','2':'num2button','3':'num3button','4':'num4button','5':'num5button','6':'num6button','7':'num7button','8':'num8button','9':'num9button',
@@ -20,7 +21,7 @@ function controlValues(control){return [control.label,control.target?.name,contr
 function intendedKey(step,target){
   const values=[target?.automation_id,target?.name];
   if(step.action==='click'||step.action==='select')values.push(step.value);
-  for(const value of values){const key=normalized(value);if(CALCULATOR_ALIASES[key])return CALCULATOR_ALIASES[key];}
+  for(const value of values){const raw=clean(value).toLowerCase();if(SYMBOL_ALIASES[raw])return SYMBOL_ALIASES[raw];const key=normalized(value);if(CALCULATOR_ALIASES[key])return CALCULATOR_ALIASES[key];}
   return '';
 }
 export function matchDesktopSteps(steps, controls=[]) {
@@ -31,8 +32,8 @@ export function matchDesktopSteps(steps, controls=[]) {
     const candidates=controls.filter(control=>requested.some(value=>controlValues(control).includes(value)));
     const alias=intendedKey(step,target);
     const aliasCandidates=alias?controls.filter(control=>controlValues(control).includes(alias)):[];
-    const textCandidates=step.action.startsWith('verify_')&&GENERIC_TARGETS.has(normalized(target.name))
-      ?controls.filter(control=>controlValues(control).includes('calculatorresults')):[];
+    const textCandidates=step.action.startsWith('verify_')
+      ?controls.filter(control=>controlValues(control).some(value=>value==='calculatorresults'||value.includes('result')||value.includes('display'))):[];
     const matched=exact || (candidates.length===1?candidates[0]:null) || (aliasCandidates.length===1?aliasCandidates[0]:null) || (textCandidates.length===1?textCandidates[0]:null);
     return {...step,target:matched?.target||target,value:clean(step.value),needs_mapping:!matched};
   });
